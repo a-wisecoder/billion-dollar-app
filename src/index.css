@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-vault-base: #080B12;
+  --color-vault-card: #111623;
+  --color-vault-elevated: #1A2234;
+  --color-vault-border: #232D42;
+  --color-vault-accent: #6366F1;
+  --color-vault-emerald: #10B981;
+  --color-vault-amber: #F59E0B;
+  --color-vault-danger: #EF4444;
+  --color-vault-text: #F8FAFC;
+  --color-vault-muted: #94A3B8;
+}
+
+@layer base {
+  html,
+  body {
+    background-color: #080B12;
+    color: #F8FAFC;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Custom sleek range slider for runway ceiling & dates */
+input[type="range"].vault-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 9999px;
+  background: #1A2234;
+  outline: none;
+}
+
+input[type="range"].vault-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: #6366F1;
+  border: 2px solid #F8FAFC;
+  cursor: pointer;
+  transition: transform 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+input[type="range"].vault-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
