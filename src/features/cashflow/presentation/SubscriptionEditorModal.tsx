@@ -18,9 +18,16 @@ import {
   type SubscriptionCategory,
 } from '../domain/subscription';
 
+export interface SubscriptionPrefillDraft {
+  readonly name: string;
+  readonly category: SubscriptionCategory;
+  readonly notes: string;
+}
+
 interface SubscriptionEditorModalProps {
   readonly isOpen: boolean;
   readonly editingSubscription: Subscription | null;
+  readonly prefillDraft?: SubscriptionPrefillDraft | null;
   readonly defaultCurrency: CurrencyCode;
   readonly onClose: () => void;
   readonly onSave: (sub: Subscription) => void;
@@ -29,6 +36,7 @@ interface SubscriptionEditorModalProps {
 export const SubscriptionEditorModal: React.FC<SubscriptionEditorModalProps> = ({
   isOpen,
   editingSubscription,
+  prefillDraft,
   defaultCurrency,
   onClose,
   onSave,
@@ -55,17 +63,17 @@ export const SubscriptionEditorModal: React.FC<SubscriptionEditorModalProps> = (
       setIsFreeTrial(editingSubscription.isFreeTrial);
       setNotes(editingSubscription.notes);
     } else {
-      setName('');
+      setName(prefillDraft?.name ?? '');
       setAmountInput('');
       setCurrency(defaultCurrency);
       setCycle('monthly');
-      setCategory('aiAndCloud');
+      setCategory(prefillDraft?.category ?? 'aiAndCloud');
       setNextBillingDate(addDaysIso(getTodayIso(), 7));
       setIsFreeTrial(false);
-      setNotes('');
+      setNotes(prefillDraft?.notes ?? '');
     }
     setError(null);
-  }, [isOpen, editingSubscription, defaultCurrency]);
+  }, [isOpen, editingSubscription, prefillDraft, defaultCurrency]);
 
   useEffect(() => {
     if (!isOpen) return;

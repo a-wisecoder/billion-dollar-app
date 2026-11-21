@@ -161,13 +161,14 @@ export const InteractiveBurnDial: React.FC<InteractiveBurnDialProps> = ({
     }
   };
 
-  // Precompute arc geometry
-  const gap = segments.length > 1 ? 0.08 : 0;
+  // Precompute arc geometry with crisp breathing gap accounting for round line caps
+  const baseGap = segments.length > 1 ? 0.21 : 0;
   let runningAngle = -Math.PI / 2;
   const computedArcs = segments.map((segment) => {
     const rawSweep = segment.fraction * Math.PI * 2;
-    const sweep = Math.max(0.03, rawSweep - gap);
-    const startAngle = runningAngle + gap / 2;
+    const effectiveGap = segments.length > 1 ? Math.min(baseGap, rawSweep * 0.45) : 0;
+    const sweep = Math.max(0.03, rawSweep - effectiveGap);
+    const startAngle = runningAngle + effectiveGap / 2;
     const endAngle = startAngle + sweep;
     runningAngle += rawSweep;
     const visual = getCategoryVisual(segment.category);

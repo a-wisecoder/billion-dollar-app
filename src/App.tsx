@@ -1,5 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarDays, Plus, Radar, ShieldCheck, Undo2 } from 'lucide-react';
+import {
+  CalendarDays,
+  Gamepad2,
+  MapPin,
+  Plus,
+  Radar,
+  ShieldCheck,
+  Undo2,
+} from 'lucide-react';
 import {
   loadVaultState,
   saveSettings,
@@ -14,11 +22,16 @@ import type {
 } from './features/cashflow/domain/subscription';
 import { RadarDashboardView } from './features/cashflow/presentation/RadarDashboardView';
 import { RunwayCeilingModal } from './features/cashflow/presentation/RunwayCeilingModal';
-import { SubscriptionEditorModal } from './features/cashflow/presentation/SubscriptionEditorModal';
+import {
+  SubscriptionEditorModal,
+  type SubscriptionPrefillDraft,
+} from './features/cashflow/presentation/SubscriptionEditorModal';
+import { VaultSentinelGame } from './features/game/presentation/VaultSentinelGame';
+import { SpendMapView } from './features/maps/presentation/SpendMapView';
 import { TimelineView } from './features/timeline/presentation/TimelineView';
 import { VaultSettingsView } from './features/vault/presentation/VaultSettingsView';
 
-type TabId = 'radar' | 'timeline' | 'vault';
+type TabId = 'radar' | 'timeline' | 'map' | 'arcade' | 'vault';
 
 const NAV_TABS: readonly {
   readonly id: TabId;
@@ -27,13 +40,41 @@ const NAV_TABS: readonly {
 }[] = [
   { id: 'radar', label: 'Radar', Icon: Radar },
   { id: 'timeline', label: 'Timeline', Icon: CalendarDays },
+  { id: 'map', label: 'Map', Icon: MapPin },
+  { id: 'arcade', label: 'Arcade', Icon: Gamepad2 },
   { id: 'vault', label: 'Vault', Icon: ShieldCheck },
 ];
 
+function getInitialRouteParams(): { tab: TabId; autostartGame: boolean } {
+  if (typeof window === 'undefined') {
+    return { tab: 'radar', autostartGame: false };
+  }
+  const params = new URLSearchParams(window.location.search);
+  const autostart = params.get('autostart') === '1';
+  if (autostart || params.get('game') === '1') {
+    return { tab: 'arcade', autostartGame: autostart };
+  }
+  const tabParam = params.get('tab');
+  if (
+    tabParam === 'radar' ||
+    tabParam === 'timeline' ||
+    tabParam === 'map' ||
+    tabParam === 'arcade' ||
+    tabParam === 'vault'
+  ) {
+    return { tab: tabParam, autostartGame: false };
+  }
+  return { tab: 'radar', autostartGame: false };
+}
+
 export const App: React.FC = () => {
   const initial = useMemo(() => loadVaultState(), []);
+  const initialRoute = useMemo(() => getInitialRouteParams(), []);
 
-  const [activeTab, setActiveTab] = useState<TabId>('radar');
+  const [activeTab, setActiveTab] = useState<TabId>(initialRoute.tab);
+  const [gameAutostart, setGameAutostart] = useState<boolean>(initialRoute.autostartGame);
+  const [gmpQuotaExceeded, setGmpQuotaExceeded] = useState(false);
+
   const [subscriptions, setSubscriptions] = useState<Subscription[]>(initial.subscriptions);
   const [settings, setSettings] = useState<VaultSettings>(initial.settings);
 
@@ -43,10 +84,17 @@ export const App: React.FC = () => {
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [prefillDraft, setPrefillDraft] = useState<SubscriptionPrefillDraft | null>(null);
   const [ceilingModalOpen, setCeilingModalOpen] = useState(false);
 
   const [undoToast, setUndoToast] = useState<{ readonly sub: Subscription } | null>(null);
   const undoTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const onQuotaExceeded = () => setGmpQuotaExceeded(true);
+    window.addEventListener('gmp-quota-exceeded', onQuotaExceeded);
+    return () => window.removeEventListener('gmp-quota-exceeded', onQuotaExceeded);
+  }, []);
 
   useEffect(() => {
     saveSubscriptions(subscriptions);
@@ -91,11 +139,19 @@ export const App: React.FC = () => {
 
   const openAddModal = () => {
     setEditingId(null);
+    setPrefillDraft(null);
+    setEditorOpen(true);
+  };
+
+  const openTrackPlaceModal = (draft: SubscriptionPrefillDraft) => {
+    setEditingId(null);
+    setPrefillDraft(draft);
     setEditorOpen(true);
   };
 
   const openEditModal = (id: string) => {
     setEditingId(id);
+    setPrefillDraft(null);
     setEditorOpen(true);
   };
 
@@ -170,8 +226,38 @@ export const App: React.FC = () => {
     }
   };
 
+  if (activeTab === 'arcade') {
+    return (
+      <VaultSentinelGame
+        autostart={gameAutostart}
+        onExit={() => {
+          setGameAutostart(false);
+          setActiveTab('radar');
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#080B12] text-[#F8FAFC] flex flex-col">
+      {/* Case A Demo Key Google Maps Platform Quota Notice */}
+      {gmpQuotaExceeded && (
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
+          <span>
+            Google Maps Platform quota reached. If you are the app owner, visit{' '}
+            <a
+              href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline font-semibold text-amber-950 hover:text-amber-800"
+            >
+              maps developer site
+            </a>{' '}
+            for instructions to update your account.
+          </span>
+        </div>
+      )}
+
       {/* Strict 3-Zone Top Bar */}
       <header className="sticky top-0 z-30 bg-[#080B12]/90 backdrop-blur-md border-b border-[#232D42]">
         <div className="max-w-6xl mx-auto h-16 px-4 sm:px-6 flex items-center justify-between gap-8">
@@ -199,7 +285,10 @@ export const App: React.FC = () => {
                   key={id}
                   type="button"
                   aria-current={active ? 'page' : undefined}
-                  onClick={() => setActiveTab(id)}
+                  onClick={() => {
+                    if (id === 'arcade') setGameAutostart(false);
+                    setActiveTab(id);
+                  }}
                   className={`relative py-1 text-sm font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#6366F1] ${
                     active
                       ? 'text-[#F8FAFC]'
@@ -263,6 +352,10 @@ export const App: React.FC = () => {
           />
         )}
 
+        {activeTab === 'map' && (
+          <SpendMapView onTrackPlaceAsBill={openTrackPlaceModal} />
+        )}
+
         {activeTab === 'vault' && (
           <VaultSettingsView
             subscriptions={subscriptions}
@@ -288,7 +381,7 @@ export const App: React.FC = () => {
       {/* Mobile Fixed Thumb-Zone Bottom Tab Bar */}
       <nav
         aria-label="Mobile navigation"
-        className="md:hidden fixed bottom-0 left-0 right-0 z-30 h-16 bg-[#0B101B]/95 backdrop-blur-md border-t border-[#232D42] grid grid-cols-3 items-center px-2"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-30 h-16 bg-[#0B101B]/95 backdrop-blur-md border-t border-[#232D42] grid grid-cols-5 items-center px-1"
       >
         {NAV_TABS.map(({ id, label, Icon }) => {
           const active = activeTab === id;
@@ -297,7 +390,10 @@ export const App: React.FC = () => {
               key={id}
               type="button"
               aria-current={active ? 'page' : undefined}
-              onClick={() => setActiveTab(id)}
+              onClick={() => {
+                if (id === 'arcade') setGameAutostart(false);
+                setActiveTab(id);
+              }}
               className={`min-h-[48px] flex flex-col items-center justify-center gap-1 rounded-xl transition-colors cursor-pointer ${
                 active ? 'text-[#6366F1]' : 'text-[#94A3B8] hover:text-[#F8FAFC]'
               }`}
@@ -335,8 +431,12 @@ export const App: React.FC = () => {
       <SubscriptionEditorModal
         isOpen={editorOpen}
         editingSubscription={editingSubscription}
+        prefillDraft={prefillDraft}
         defaultCurrency={settings.baseCurrency}
-        onClose={() => setEditorOpen(false)}
+        onClose={() => {
+          setEditorOpen(false);
+          setPrefillDraft(null);
+        }}
         onSave={handleSaveSubscription}
       />
 

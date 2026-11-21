@@ -11,6 +11,8 @@
     "test": "tsx --test src/core/utils/__tests__/coreLogic.test.ts"
   },
   "dependencies": {
+    "@types/google.maps": "^3.67.0",
+    "@vis.gl/react-google-maps": "^1.10.2",
     "lucide-react": "^0.511.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

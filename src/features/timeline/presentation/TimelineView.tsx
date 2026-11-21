@@ -33,7 +33,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
 
   const [viewYear, setViewYear] = useState(parsedToday.year);
   const [viewMonth, setViewMonth] = useState(parsedToday.month);
-  const [selectedDateIso, setSelectedDateIso] = useState<string>(todayIso);
+  const [selectedDateIso, setSelectedDateIso] = useState<string | null>(null);
 
   const timeline = useMemo(
     () => computeMonthTimeline(subscriptions, settings, viewYear, viewMonth),
@@ -41,11 +41,17 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   );
 
   const selectedDay = useMemo(() => {
-    const exact = timeline.days.find((d) => d.dateIso === selectedDateIso);
-    if (exact) return exact;
+    if (selectedDateIso) {
+      const exact = timeline.days.find((d) => d.dateIso === selectedDateIso);
+      if (exact) return exact;
+    }
+    const upcomingWithCharge = timeline.days.find(
+      (d) => d.dateIso >= todayIso && d.charges.length > 0,
+    );
+    if (upcomingWithCharge) return upcomingWithCharge;
     const firstWithCharge = timeline.days.find((d) => d.charges.length > 0);
     return firstWithCharge ?? timeline.days[0];
-  }, [timeline.days, selectedDateIso]);
+  }, [timeline.days, selectedDateIso, todayIso]);
 
   const navigateMonth = (delta: number) => {
     const totalMonths = viewYear * 12 + (viewMonth - 1) + delta;

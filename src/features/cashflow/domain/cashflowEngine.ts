@@ -151,10 +151,6 @@ export function computeCashflowSummary(
       );
     })
     .sort((a, b) => {
-      // Unpaused first, then soonest renewal date
-      if (a.subscription.isSimulatedPaused !== b.subscription.isSimulatedPaused) {
-        return a.subscription.isSimulatedPaused ? 1 : -1;
-      }
       if (a.daysUntilRenewal !== b.daysUntilRenewal) {
         return a.daysUntilRenewal - b.daysUntilRenewal;
       }
