@@ -128,30 +128,30 @@ const PlaceMarkerWithInfo: React.FC<PlaceMarkerWithInfoProps> = ({
         onClick={onSelect}
       >
         <Pin
-          background={isSelected ? '#6366F1' : '#1E293B'}
-          borderColor={isSelected ? '#E0E7FF' : '#6366F1'}
-          glyphColor="#F8FAFC"
+          background={isSelected ? '#1E6B58' : '#FFFFFF'}
+          borderColor="#1E6B58"
+          glyphColor={isSelected ? '#FFFFFF' : '#1E6B58'}
         />
       </AdvancedMarker>
 
       {isSelected && marker && (
         <InfoWindow anchor={marker} onCloseClick={onClose} maxWidth={280}>
-          <div className="p-1 text-[#0F172A]">
+          <div className="p-1 text-[#17211E]">
             <p className="text-sm font-bold leading-snug">{place.displayName}</p>
             {place.primaryTypeLabel && (
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-[#4F46E5] mt-0.5">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-[#1E6B58] mt-0.5">
                 {place.primaryTypeLabel}
               </p>
             )}
             {place.formattedAddress && (
-              <p className="text-xs text-[#475569] mt-1 leading-relaxed">
+              <p className="text-xs text-[#5B6662] mt-1 leading-relaxed">
                 {place.formattedAddress}
               </p>
             )}
             <button
               type="button"
               onClick={() => onTrack(place)}
-              className="mt-2.5 w-full min-h-[34px] px-3 py-1.5 rounded-lg bg-[#4F46E5] hover:bg-[#4338CA] text-xs font-semibold text-white flex items-center justify-center gap-1.5 cursor-pointer"
+              className="mt-2.5 w-full min-h-[34px] px-3 py-1.5 rounded-lg bg-[#1E6B58] hover:bg-[#175747] text-xs font-semibold text-white flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" aria-hidden="true" />
               <span>Track as Bill</span>
@@ -372,22 +372,22 @@ const MapExplorerInner: React.FC<MapExplorerInnerProps> = ({ onTrackPlaceAsBill 
   return (
     <div className="space-y-5">
       {/* Header & Search Bar */}
-      <div className="rounded-2xl bg-[#111623] border border-[#232D42] p-4 sm:p-5 space-y-4">
+      <div className="rounded-2xl vault-surface p-4 sm:p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-extrabold tracking-tight text-[#F8FAFC]">
+            <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-[#17211E]">
               Local Membership &amp; Merchant Map
             </h1>
-            <p className="text-xs text-[#94A3B8] mt-1">
-              Find physical gyms, coworking hubs, cafes, or transit stations and add them to your Cashflow Radar.
+            <p className="text-xs text-[#5B6662] mt-1">
+              Find physical gyms, coworking hubs, cafes, or transit stations and add them to your recurring bills.
             </p>
           </div>
           <button
             type="button"
             onClick={handleLocateMe}
-            className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#1A2234] border border-[#232D42] hover:border-[#6366F1] text-xs font-semibold text-[#F8FAFC] flex items-center gap-2 whitespace-nowrap self-start sm:self-auto transition-colors cursor-pointer"
+            className="min-h-[38px] px-3.5 py-2 rounded-xl bg-[#F5F6F3] border border-[#E4E7E1] hover:border-[#1E6B58] text-xs font-semibold text-[#17211E] flex items-center gap-2 whitespace-nowrap self-start sm:self-auto transition-colors cursor-pointer"
           >
-            <LocateFixed className="w-4 h-4 text-[#06B6D4]" aria-hidden="true" />
+            <LocateFixed className="w-4 h-4 text-[#1E6B58]" aria-hidden="true" />
             <span>Near Me</span>
           </button>
         </div>
@@ -395,7 +395,7 @@ const MapExplorerInner: React.FC<MapExplorerInnerProps> = ({ onTrackPlaceAsBill 
         {/* Autocomplete Search Input */}
         <div className="relative">
           <Search
-            className="w-4 h-4 text-[#94A3B8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+            className="w-4 h-4 text-[#85918C] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
             aria-hidden="true"
           />
           <input
@@ -408,7 +408,7 @@ const MapExplorerInner: React.FC<MapExplorerInnerProps> = ({ onTrackPlaceAsBill 
             }}
             placeholder="Search a gym, coworking space, cafe, or address..."
             aria-label="Search merchant or place"
-            className="w-full h-11 pl-10 pr-10 rounded-xl bg-[#1A2234] border border-[#232D42] text-sm text-[#F8FAFC] placeholder:text-[#64748B] focus:outline-none focus:border-[#6366F1]"
+            className="w-full h-11 pl-10 pr-10 rounded-xl bg-[#F5F6F3] border border-[#E4E7E1] text-sm text-[#17211E] placeholder:text-[#85918C] focus:outline-none focus:bg-white focus:border-[#1E6B58]"
           />
           {searchInput && (
             <button
@@ -419,7 +419,7 @@ const MapExplorerInner: React.FC<MapExplorerInnerProps> = ({ onTrackPlaceAsBill 
                 setDropdownOpen(false);
               }}
               aria-label="Clear place search"
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg text-[#94A3B8] hover:text-[#F8FAFC] flex items-center justify-center cursor-pointer"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg text-[#85918C] hover:text-[#17211E] flex items-center justify-center cursor-pointer"
             >
               <X className="w-4 h-4" aria-hidden="true" />
             </button>
@@ -429,10 +429,10 @@ const MapExplorerInner: React.FC<MapExplorerInnerProps> = ({ onTrackPlaceAsBill 
             <div
               role="listbox"
               aria-label="Place suggestions"
-              className="absolute left-0 right-0 top-[calc(100%+6px)] z-30 rounded-xl bg-[#111623] border border-[#232D42] shadow-2xl overflow-hidden"
+              className="absolute left-0 right-0 top-[calc(100%+6px)] z-30 rounded-xl bg-white border border-[#E4E7E1] shadow-lg overflow-hidden"
             >
               {isAutocompleteLoading && suggestions.length === 0 ? (
-                <div className="px-4 py-3 text-xs text-[#94A3B8]">Searching places...</div>
+                <div className="px-4 py-3 text-xs text-[#5B6662]">Searching places...</div>
               ) : (
                 suggestions.map((suggestion, index) => {
                   const prediction = suggestion.placePrediction;
@@ -443,13 +443,13 @@ const MapExplorerInner: React.FC<MapExplorerInnerProps> = ({ onTrackPlaceAsBill 
                       type="button"
                       role="option"
                       onClick={() => handleSelectSuggestion(suggestion)}
-                      className="w-full text-left px-4 py-2.5 hover:bg-[#1A2234] border-b last:border-b-0 border-[#232D42]/60 flex items-start gap-2.5 transition-colors cursor-pointer"
+                      className="w-full text-left px-4 py-2.5 hover:bg-[#F5F6F3] border-b last:border-b-0 border-[#EEF1EC] flex items-start gap-2.5 transition-colors cursor-pointer"
                     >
                       <MapPin
-                        className="w-4 h-4 text-[#6366F1] shrink-0 mt-0.5"
+                        className="w-4 h-4 text-[#1E6B58] shrink-0 mt-0.5"
                         aria-hidden="true"
                       />
-                      <span className="text-xs font-medium text-[#F8FAFC] leading-snug">
+                      <span className="text-xs font-medium text-[#17211E] leading-snug">
                         {prediction.text.text}
                       </span>
                     </button>
@@ -462,7 +462,7 @@ const MapExplorerInner: React.FC<MapExplorerInnerProps> = ({ onTrackPlaceAsBill 
 
         {/* Nearby Discovery Category Controls */}
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-[#94A3B8] mr-1">
+          <span className="text-xs font-semibold text-[#5B6662] mr-1">
             Explore nearby:
           </span>
           {NEARBY_CATEGORIES.map((cat) => {
@@ -474,10 +474,10 @@ const MapExplorerInner: React.FC<MapExplorerInnerProps> = ({ onTrackPlaceAsBill 
                 type="button"
                 disabled={isSearchingNearby}
                 onClick={() => handleNearbySearch(cat)}
-                className={`min-h-[36px] px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 ${
+                className={`min-h-[34px] px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 ${
                   active
-                    ? 'bg-[#6366F1]/20 border-[#6366F1] text-[#F8FAFC]'
-                    : 'bg-[#1A2234] border-[#232D42] text-[#94A3B8] hover:text-[#F8FAFC] hover:border-[#334155]'
+                    ? 'bg-[#E6F2EE] border-[#1E6B58] text-[#155243]'
+                    : 'bg-[#F5F6F3] border-[#E4E7E1] text-[#5B6662] hover:text-[#17211E] hover:border-[#CFD6CC]'
                 }`}
               >
                 <CatIcon
@@ -491,7 +491,7 @@ const MapExplorerInner: React.FC<MapExplorerInnerProps> = ({ onTrackPlaceAsBill 
         </div>
 
         {(statusMessage || errorMessage) && (
-          <p className="text-xs text-[#F59E0B]">{statusMessage || errorMessage}</p>
+          <p className="text-xs font-medium text-[#B86A14]">{statusMessage || errorMessage}</p>
         )}
       </div>
 
@@ -499,13 +499,13 @@ const MapExplorerInner: React.FC<MapExplorerInnerProps> = ({ onTrackPlaceAsBill 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         <div
           data-testid="google-map-container"
-          className="lg:col-span-8 h-[420px] lg:h-[540px] rounded-2xl overflow-hidden border border-[#232D42] bg-[#0B101B] relative"
+          className="lg:col-span-8 h-[420px] lg:h-[540px] rounded-2xl overflow-hidden border border-[#E4E7E1] bg-[#EEF1EC] relative"
         >
           <GoogleMap
             mapId="DEMO_MAP_ID"
             defaultCenter={DEFAULT_CENTER}
             defaultZoom={13}
-            colorScheme="DARK"
+            colorScheme="LIGHT"
             gestureHandling="greedy"
             disableDefaultUI={false}
             internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
@@ -530,9 +530,9 @@ const MapExplorerInner: React.FC<MapExplorerInnerProps> = ({ onTrackPlaceAsBill 
         </div>
 
         {/* Discovered Places Panel */}
-        <aside className="lg:col-span-4 rounded-2xl bg-[#111623] border border-[#232D42] p-4 flex flex-col max-h-[540px]">
-          <div className="flex items-center justify-between gap-2 pb-3 border-b border-[#232D42]">
-            <h2 className="text-sm font-bold text-[#F8FAFC]">
+        <aside className="lg:col-span-4 rounded-2xl vault-surface p-4 flex flex-col max-h-[540px]">
+          <div className="flex items-center justify-between gap-2 pb-3 border-b border-[#EEF1EC]">
+            <h2 className="text-sm font-bold text-[#17211E]">
               {places.length > 0 ? `Places (${places.length})` : 'Discovered Places'}
             </h2>
             {places.length > 0 && (
@@ -543,7 +543,7 @@ const MapExplorerInner: React.FC<MapExplorerInnerProps> = ({ onTrackPlaceAsBill 
                   setSelectedPlaceId(null);
                   setActiveCategoryId(null);
                 }}
-                className="text-xs font-medium text-[#94A3B8] hover:text-[#F8FAFC] cursor-pointer"
+                className="text-xs font-semibold text-[#5B6662] hover:text-[#17211E] cursor-pointer"
               >
                 Clear
               </button>
@@ -552,9 +552,9 @@ const MapExplorerInner: React.FC<MapExplorerInnerProps> = ({ onTrackPlaceAsBill 
 
           {places.length === 0 ? (
             <div className="py-10 text-center space-y-2">
-              <MapPin className="w-7 h-7 text-[#6366F1] mx-auto opacity-80" aria-hidden="true" />
-              <p className="text-sm font-semibold text-[#F8FAFC]">No places pinned yet</p>
-              <p className="text-xs text-[#94A3B8] leading-relaxed max-w-[240px] mx-auto">
+              <MapPin className="w-7 h-7 text-[#1E6B58] mx-auto opacity-80" aria-hidden="true" />
+              <p className="text-sm font-bold text-[#17211E]">No places pinned yet</p>
+              <p className="text-xs text-[#5B6662] leading-relaxed max-w-[240px] mx-auto">
                 Search for a local business above or pick a nearby category to inspect locations on the map.
               </p>
             </div>
@@ -567,8 +567,8 @@ const MapExplorerInner: React.FC<MapExplorerInnerProps> = ({ onTrackPlaceAsBill 
                     key={place.id}
                     className={`rounded-xl p-3 border transition-colors ${
                       isSelected
-                        ? 'bg-[#1A2234] border-[#6366F1]'
-                        : 'bg-[#0B101B] border-[#232D42] hover:border-[#334155]'
+                        ? 'bg-[#E6F2EE]/60 border-[#1E6B58]'
+                        : 'bg-[#F5F6F3] border-[#E4E7E1] hover:border-[#CFD6CC]'
                     }`}
                   >
                     <button
@@ -582,24 +582,24 @@ const MapExplorerInner: React.FC<MapExplorerInnerProps> = ({ onTrackPlaceAsBill 
                       }}
                       className="w-full text-left cursor-pointer"
                     >
-                      <p className="text-sm font-semibold text-[#F8FAFC] leading-snug">
+                      <p className="text-sm font-bold text-[#17211E] leading-snug">
                         {place.displayName}
                       </p>
-                      <p className="text-[11px] font-medium text-[#6366F1] mt-0.5">
+                      <p className="text-[11px] font-semibold text-[#1E6B58] mt-0.5">
                         {place.primaryTypeLabel}
                       </p>
                       {place.formattedAddress && (
-                        <p className="text-xs text-[#94A3B8] mt-1 leading-relaxed">
+                        <p className="text-xs text-[#5B6662] mt-1 leading-relaxed">
                           {place.formattedAddress}
                         </p>
                       )}
                     </button>
 
-                    <div className="mt-2.5 pt-2.5 border-t border-[#232D42]/80 flex justify-end">
+                    <div className="mt-2.5 pt-2.5 border-t border-[#E4E7E1] flex justify-end">
                       <button
                         type="button"
                         onClick={() => handleTrack(place)}
-                        className="min-h-[32px] px-3 py-1 rounded-lg bg-[#6366F1] hover:bg-[#5558E6] text-xs font-semibold text-white flex items-center gap-1 cursor-pointer"
+                        className="min-h-[32px] px-3 py-1 rounded-lg bg-[#1E6B58] hover:bg-[#175747] text-xs font-semibold text-white flex items-center gap-1 cursor-pointer"
                       >
                         <Plus className="w-3.5 h-3.5" aria-hidden="true" />
                         <span>Track as Bill</span>
@@ -621,13 +621,13 @@ export const SpendMapView: React.FC<SpendMapViewProps> = ({ onTrackPlaceAsBill }
 
   if (!apiKey) {
     return (
-      <div className="rounded-2xl bg-[#111623] border border-[#232D42] p-8 text-center max-w-xl mx-auto mt-6 space-y-3">
-        <MapPin className="w-8 h-8 text-[#6366F1] mx-auto" aria-hidden="true" />
-        <h1 className="text-lg font-bold text-[#F8FAFC]">
+      <div className="rounded-2xl vault-surface p-8 text-center max-w-xl mx-auto mt-6 space-y-3">
+        <MapPin className="w-8 h-8 text-[#1E6B58] mx-auto" aria-hidden="true" />
+        <h1 className="text-lg font-bold text-[#17211E]">
           Google Maps Platform Not Configured
         </h1>
-        <p className="text-sm text-[#94A3B8] leading-relaxed">
-          Set <code className="font-mono text-xs text-[#F8FAFC]">VITE_GOOGLE_MAPS_API_KEY</code> in your environment to enable the interactive merchant map and Places search.
+        <p className="text-sm text-[#5B6662] leading-relaxed">
+          Set <code className="font-mono text-xs text-[#17211E]">VITE_GOOGLE_MAPS_API_KEY</code> in your environment to enable the interactive merchant map and Places search.
         </p>
       </div>
     );

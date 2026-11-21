@@ -16,10 +16,10 @@ interface InteractiveBurnDialProps {
   readonly onAddFirst?: () => void;
 }
 
-const DIAL_SIZE = 276;
+const DIAL_SIZE = 264;
 const CENTER = DIAL_SIZE / 2;
-const BASE_RADIUS = 108;
-const INNER_CORE_RADIUS = 76;
+const BASE_RADIUS = 102;
+const INNER_CORE_RADIUS = 72;
 
 function polarToCartesian(cx: number, cy: number, radius: number, angleRad: number) {
   return {
@@ -36,7 +36,6 @@ function describeArc(
   endAngle: number,
 ): string {
   const sweep = endAngle - startAngle;
-  // Full circle special case (avoid degenerate SVG arc where start == end)
   if (sweep >= Math.PI * 2 - 0.01) {
     const mid = startAngle + Math.PI;
     const p1 = polarToCartesian(cx, cy, radius, startAngle);
@@ -65,7 +64,6 @@ export const InteractiveBurnDial: React.FC<InteractiveBurnDialProps> = ({
 }) => {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const isDraggingRef = useRef(false);
-  const lastScrubCategoryRef = useRef<SubscriptionCategory | null>(selectedCategory);
 
   const activeSegment =
     selectedCategory === null
@@ -99,7 +97,6 @@ export const InteractiveBurnDial: React.FC<InteractiveBurnDialProps> = ({
         return;
       }
 
-      // Clockwise angle starting from 12 o'clock (0..2*PI)
       let touchAngle = Math.atan2(dy, dx) + Math.PI / 2;
       if (touchAngle < 0) touchAngle += Math.PI * 2;
 
@@ -109,11 +106,9 @@ export const InteractiveBurnDial: React.FC<InteractiveBurnDialProps> = ({
         if (touchAngle >= cursor && touchAngle <= cursor + sweep) {
           if (isClick && selectedCategory === segment.category) {
             triggerHaptic();
-            lastScrubCategoryRef.current = null;
             onSelectCategory(null);
           } else if (selectedCategory !== segment.category) {
             triggerHaptic();
-            lastScrubCategoryRef.current = segment.category;
             onSelectCategory(segment.category);
           }
           return;
@@ -130,8 +125,7 @@ export const InteractiveBurnDial: React.FC<InteractiveBurnDialProps> = ({
     const scale = DIAL_SIZE / rect.width;
     const dx = (e.clientX - rect.left) * scale - CENTER;
     const dy = (e.clientY - rect.top) * scale - CENTER;
-    const dist = Math.hypot(dx, dy);
-    if (dist < INNER_CORE_RADIUS) return;
+    if (Math.hypot(dx, dy) < INNER_CORE_RADIUS) return;
 
     isDraggingRef.current = true;
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -161,12 +155,11 @@ export const InteractiveBurnDial: React.FC<InteractiveBurnDialProps> = ({
     }
   };
 
-  // Precompute arc geometry with crisp breathing gap accounting for round line caps
-  const baseGap = segments.length > 1 ? 0.21 : 0;
+  const baseGap = segments.length > 1 ? 0.19 : 0;
   let runningAngle = -Math.PI / 2;
   const computedArcs = segments.map((segment) => {
     const rawSweep = segment.fraction * Math.PI * 2;
-    const effectiveGap = segments.length > 1 ? Math.min(baseGap, rawSweep * 0.45) : 0;
+    const effectiveGap = segments.length > 1 ? Math.min(baseGap, rawSweep * 0.42) : 0;
     const sweep = Math.max(0.03, rawSweep - effectiveGap);
     const startAngle = runningAngle + effectiveGap / 2;
     const endAngle = startAngle + sweep;
@@ -203,7 +196,7 @@ export const InteractiveBurnDial: React.FC<InteractiveBurnDialProps> = ({
       data-period={showAnnual ? 'annual' : 'monthly'}
       data-selected-category={selectedCategory ?? 'all'}
     >
-      <div className="relative flex items-center justify-center w-[276px] h-[276px] select-none touch-none">
+      <div className="relative flex items-center justify-center w-[264px] h-[264px] select-none touch-none">
         <svg
           ref={svgRef}
           width={DIAL_SIZE}
@@ -214,62 +207,41 @@ export const InteractiveBurnDial: React.FC<InteractiveBurnDialProps> = ({
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
-          aria-label="Interactive burn rate dial. Drag around the ring to inspect spending categories."
+          aria-label="Interactive burn rate dial. Click or drag around the ring to inspect spending categories."
           role="img"
         >
-          <defs>
-            <filter id="vault-arc-glow" x="-25%" y="-25%" width="150%" height="150%">
-              <feGaussianBlur stdDeviation="5" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
-
-          {/* Calm OLED background track */}
+          {/* Soft recessed linen track */}
           <circle
             cx={CENTER}
             cy={CENTER}
             r={BASE_RADIUS}
             fill="none"
-            stroke="#1A2234"
+            stroke="#EEF1EC"
             strokeWidth={18}
           />
 
-          {/* Multi-segment active arcs */}
+          {/* Tactile harmonized category arcs */}
           {computedArcs.map(({ segment, visual, startAngle, endAngle, isSelected, isDimmed }) => {
-            const radius = isSelected ? BASE_RADIUS + 5 : BASE_RADIUS;
-            const strokeWidth = isSelected ? 24 : 18;
+            const radius = isSelected ? BASE_RADIUS + 4 : BASE_RADIUS;
+            const strokeWidth = isSelected ? 22 : 17;
             const pathD = describeArc(CENTER, CENTER, radius, startAngle, endAngle);
 
             return (
-              <g key={segment.category} className="transition-all duration-200 ease-out">
-                {!isDimmed && (
-                  <path
-                    d={pathD}
-                    fill="none"
-                    stroke={visual.color}
-                    strokeWidth={strokeWidth + 4}
-                    strokeLinecap="round"
-                    opacity={isSelected ? 0.36 : 0.14}
-                    filter="url(#vault-arc-glow)"
-                  />
-                )}
-                <path
-                  d={pathD}
-                  fill="none"
-                  stroke={visual.color}
-                  strokeWidth={strokeWidth}
-                  strokeLinecap="round"
-                  opacity={isDimmed ? 0.22 : 1}
-                />
-              </g>
+              <path
+                key={segment.category}
+                d={pathD}
+                fill="none"
+                stroke={visual.color}
+                strokeWidth={strokeWidth}
+                strokeLinecap="round"
+                opacity={isDimmed ? 0.24 : 0.94}
+                className="transition-all duration-200 ease-out"
+              />
             );
           })}
         </svg>
 
-        {/* Interactive center readout core */}
+        {/* Elevated ceramic-white center dial button */}
         <button
           type="button"
           onClick={handleCenterClick}
@@ -278,45 +250,44 @@ export const InteractiveBurnDial: React.FC<InteractiveBurnDialProps> = ({
               ? `Reset ${displayTitle} filter and show all categories`
               : `Switch to ${showAnnual ? 'monthly' : 'annual'} burn view`
           }
-          className="absolute inset-0 m-auto w-[156px] h-[156px] rounded-full flex flex-col items-center justify-center text-center px-3 bg-[#0B101B]/90 border border-[#232D42]/80 hover:border-[#6366F1]/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#6366F1] transition-colors cursor-pointer"
+          className="absolute inset-0 m-auto w-[150px] h-[150px] rounded-full flex flex-col items-center justify-center text-center px-3 bg-white border border-[#E4E7E1] shadow-[0_6px_18px_-6px_rgba(23,33,30,0.09)] hover:border-[#1E6B58]/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1E6B58] transition-colors cursor-pointer"
         >
           <span
             className="text-xs font-semibold tracking-wide transition-colors"
             style={{
               color: activeSegment
                 ? getCategoryVisual(activeSegment.category).color
-                : '#94A3B8',
+                : '#5B6662',
             }}
           >
             {displayTitle}
           </span>
           <span
-            className="mt-1 font-mono tabular-nums text-[26px] leading-tight font-bold tracking-tight text-[#F8FAFC] max-w-full truncate"
+            className="mt-1 font-mono tabular-nums text-[24px] leading-tight font-bold tracking-tight text-[#17211E] max-w-full truncate"
             data-testid="burn-dial-total"
           >
             {formatMinorUnits(animatedAmount, baseCurrency, {
               showDecimals: baseCurrency !== 'PKR',
             })}
           </span>
-          <span className="mt-1.5 text-[11px] font-medium text-[#94A3B8]">
+          <span className="mt-1 text-[11px] font-medium text-[#85918C]">
             {displaySub}
           </span>
         </button>
       </div>
 
-      {/* Zero-data helper action */}
+      {/* Zero-data helper or clean category legend controls */}
       {segments.length === 0 && onAddFirst ? (
         <button
           type="button"
           onClick={onAddFirst}
-          className="mt-4 px-4 py-2 text-xs font-semibold rounded-lg bg-[#6366F1] text-white hover:bg-[#5558E6] transition-colors whitespace-nowrap"
+          className="mt-4 px-4 py-2 text-xs font-semibold rounded-xl bg-[#1E6B58] text-white hover:bg-[#175747] transition-colors whitespace-nowrap cursor-pointer"
         >
           Add a recurring bill
         </button>
       ) : (
-        /* Synchronized category filter segmented buttons */
         <div
-          className="mt-5 flex flex-wrap items-center justify-center gap-2"
+          className="mt-5 flex flex-wrap items-center justify-center gap-1.5"
           role="group"
           aria-label="Filter subscriptions by category"
         >
@@ -332,16 +303,16 @@ export const InteractiveBurnDial: React.FC<InteractiveBurnDialProps> = ({
                   triggerHaptic();
                   onSelectCategory(isSelected ? null : seg.category);
                 }}
-                className={`min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 border transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#6366F1] ${
+                className={`min-h-[34px] px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 border transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#1E6B58] ${
                   isSelected
-                    ? 'bg-[#1A2234] text-[#F8FAFC]'
-                    : 'bg-[#111623] text-[#94A3B8] border-[#232D42] hover:text-[#F8FAFC] hover:border-[#334155]'
+                    ? 'text-[#17211E] font-semibold'
+                    : 'bg-[#F5F6F3] text-[#5B6662] border-[#E4E7E1] hover:text-[#17211E] hover:border-[#CFD6CC]'
                 }`}
                 style={
                   isSelected
                     ? {
                         borderColor: visual.color,
-                        backgroundColor: `${visual.color}1F`,
+                        backgroundColor: `${visual.color}14`,
                       }
                     : undefined
                 }
@@ -352,7 +323,7 @@ export const InteractiveBurnDial: React.FC<InteractiveBurnDialProps> = ({
                   aria-hidden="true"
                 />
                 <span>{visual.label}</span>
-                <span className="font-mono tabular-nums text-[11px] opacity-80">
+                <span className="font-mono tabular-nums text-[11px] text-[#5B6662]">
                   {Math.round(seg.fraction * 100)}%
                 </span>
               </button>

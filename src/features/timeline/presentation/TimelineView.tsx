@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
+import { AlertTriangle, BarChart3, ChevronLeft, ChevronRight, Pencil } from 'lucide-react';
 import { getCategoryVisual } from '../../../core/theme/categoryIcons';
 import {
   formatMonthYear,
@@ -8,6 +8,7 @@ import {
   parseIsoDate,
 } from '../../../core/utils/dateMath';
 import { formatMinorUnits } from '../../../core/utils/moneyFormatter';
+import { compute12MonthForecast } from '../../audit/domain/auditEngine';
 import {
   BILLING_CYCLES,
   type Subscription,
@@ -35,6 +36,21 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   const [viewMonth, setViewMonth] = useState(parsedToday.month);
   const [selectedDateIso, setSelectedDateIso] = useState<string | null>(null);
 
+  const forecast = useMemo(
+    () => compute12MonthForecast(subscriptions, settings, todayIso),
+    [subscriptions, settings, todayIso],
+  );
+
+  const maxForecastMinor = useMemo(
+    () => Math.max(1, ...forecast.map((m) => m.totalBaseMinorUnits)),
+    [forecast],
+  );
+
+  const spikeCount = useMemo(
+    () => forecast.filter((m) => m.isSpike).length,
+    [forecast],
+  );
+
   const timeline = useMemo(
     () => computeMonthTimeline(subscriptions, settings, viewYear, viewMonth),
     [subscriptions, settings, viewYear, viewMonth],
@@ -59,6 +75,13 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     const nextMonth = ((totalMonths % 12) + 12) % 12 + 1;
     setViewYear(nextYear);
     setViewMonth(nextMonth);
+    setSelectedDateIso(null);
+  };
+
+  const jumpToMonth = (year: number, month: number) => {
+    setViewYear(year);
+    setViewMonth(month);
+    setSelectedDateIso(null);
   };
 
   const jumpToToday = () => {
@@ -68,17 +91,18 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   };
 
   const leadingBlanks = Array.from({ length: timeline.firstWeekdayOffset });
+  const showDecimals = settings.baseCurrency !== 'PKR';
 
   return (
     <div className="space-y-6" data-testid="timeline-view">
       {/* Header + Month Controls */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#F8FAFC]">
+          <h1 className="text-2xl sm:text-[28px] font-extrabold tracking-tight text-[#17211E]">
             Cashflow Timeline
           </h1>
-          <p className="mt-1 text-sm text-[#94A3B8]">
-            Projected recurring renewals and weekly cashflow concentration
+          <p className="mt-1 text-sm text-[#5B6662]">
+            Spot annual renewal spikes 12 months ahead and inspect daily billing clusters.
           </p>
         </div>
 
@@ -86,22 +110,22 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
           <button
             type="button"
             onClick={jumpToToday}
-            className="min-h-[40px] px-3 py-1.5 rounded-xl bg-[#111623] border border-[#232D42] hover:border-[#6366F1] text-xs font-semibold text-[#F8FAFC] transition-colors cursor-pointer"
+            className="min-h-[38px] px-3 py-1.5 rounded-xl bg-white border border-[#E4E7E1] hover:border-[#1E6B58] text-xs font-semibold text-[#17211E] transition-colors cursor-pointer"
           >
             Today
           </button>
 
-          <div className="flex items-center rounded-xl bg-[#111623] border border-[#232D42] p-0.5">
+          <div className="flex items-center rounded-xl bg-white border border-[#E4E7E1] p-0.5">
             <button
               type="button"
               onClick={() => navigateMonth(-1)}
               aria-label="Previous month"
-              className="min-h-[38px] min-w-[38px] rounded-lg text-[#94A3B8] hover:text-[#F8FAFC] hover:bg-[#1A2234] flex items-center justify-center transition-colors cursor-pointer"
+              className="min-h-[36px] min-w-[36px] rounded-lg text-[#5B6662] hover:text-[#17211E] hover:bg-[#F5F6F3] flex items-center justify-center transition-colors cursor-pointer"
             >
               <ChevronLeft className="w-4 h-4" aria-hidden="true" />
             </button>
             <span
-              className="px-3 text-sm font-bold text-[#F8FAFC] whitespace-nowrap min-w-[144px] text-center"
+              className="px-3 text-sm font-bold text-[#17211E] whitespace-nowrap min-w-[144px] text-center"
               data-testid="timeline-month-label"
             >
               {formatMonthYear(viewYear, viewMonth)}
@@ -110,7 +134,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
               type="button"
               onClick={() => navigateMonth(1)}
               aria-label="Next month"
-              className="min-h-[38px] min-w-[38px] rounded-lg text-[#94A3B8] hover:text-[#F8FAFC] hover:bg-[#1A2234] flex items-center justify-center transition-colors cursor-pointer"
+              className="min-h-[36px] min-w-[36px] rounded-lg text-[#5B6662] hover:text-[#17211E] hover:bg-[#F5F6F3] flex items-center justify-center transition-colors cursor-pointer"
             >
               <ChevronRight className="w-4 h-4" aria-hidden="true" />
             </button>
@@ -118,30 +142,113 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         </div>
       </div>
 
+      {/* Interactive 12-Month Renewal Spike Forecast */}
+      <section
+        className="rounded-2xl vault-surface p-5"
+        aria-label="12-month renewal forecast"
+        data-testid="forecast-12m-chart"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="w-4 h-4 text-[#1E6B58]" aria-hidden="true" />
+            <h2 className="text-sm font-bold text-[#17211E]">
+              12-Month Cashflow Forecast
+            </h2>
+          </div>
+          <p className="text-xs text-[#5B6662]">
+            {spikeCount > 0 ? (
+              <span>
+                <span className="font-semibold text-[#B86A14]">{spikeCount} spike {spikeCount === 1 ? 'month' : 'months'}</span>{' '}
+                detected · Click any bar to inspect
+              </span>
+            ) : (
+              'Steady monthly outflow · Click any bar to jump'
+            )}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-6 sm:grid-cols-12 gap-2 items-end h-[136px] pt-4">
+          {forecast.map((bar) => {
+            const isSelectedMonth = bar.year === viewYear && bar.month === viewMonth;
+            const heightPct =
+              bar.totalBaseMinorUnits > 0
+                ? Math.max(14, Math.round((bar.totalBaseMinorUnits / maxForecastMinor) * 100))
+                : 6;
+            const barColor = isSelectedMonth
+              ? '#1E6B58'
+              : bar.isSpike
+                ? '#C97E24'
+                : '#C9D6D0';
+
+            return (
+              <button
+                key={`${bar.year}-${bar.month}`}
+                type="button"
+                onClick={() => jumpToMonth(bar.year, bar.month)}
+                aria-label={`${bar.fullLabel}: ${formatMinorUnits(bar.totalBaseMinorUnits, settings.baseCurrency, { showDecimals: false })}${bar.isSpike ? ' (renewal spike)' : ''}`}
+                aria-pressed={isSelectedMonth}
+                data-testid={`forecast-bar-${bar.year}-${bar.month}`}
+                className="flex flex-col items-center justify-end h-full gap-1.5 group cursor-pointer focus-visible:outline-2 focus-visible:outline-[#1E6B58] rounded-lg"
+              >
+                <span
+                  className={`font-mono tabular-nums text-[10px] font-semibold transition-colors ${
+                    isSelectedMonth
+                      ? 'text-[#1E6B58]'
+                      : bar.isSpike
+                        ? 'text-[#B86A14]'
+                        : 'text-[#85918C] group-hover:text-[#17211E]'
+                  }`}
+                >
+                  {formatMinorUnits(bar.totalBaseMinorUnits, settings.baseCurrency, {
+                    showDecimals: false,
+                  })}
+                </span>
+                <div className="w-full flex-1 flex items-end justify-center px-0.5">
+                  <div
+                    className="w-full max-w-[30px] rounded-t-lg transition-all duration-200 group-hover:opacity-90"
+                    style={{
+                      height: `${heightPct}%`,
+                      backgroundColor: barColor,
+                    }}
+                  />
+                </div>
+                <span
+                  className={`text-[11px] font-semibold ${
+                    isSelectedMonth ? 'text-[#17211E]' : 'text-[#5B6662]'
+                  }`}
+                >
+                  {bar.shortLabel}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
       {/* Heavy-Week Cluster Alert */}
       {timeline.heavyWeekCluster && (
         <div
           role="status"
           data-testid="heavy-week-alert"
-          className="rounded-2xl bg-[#F59E0B]/12 border border-[#F59E0B]/40 px-4 py-3.5 flex flex-wrap items-center justify-between gap-3"
+          className="rounded-2xl bg-[#FDF7ED] border border-[#EED7B4] px-4 py-3.5 flex flex-wrap items-center justify-between gap-3"
         >
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-[#F59E0B]/18 flex items-center justify-center shrink-0">
-              <AlertTriangle className="w-4 h-4 text-[#F59E0B]" aria-hidden="true" />
+            <div className="w-9 h-9 rounded-xl bg-white border border-[#EED7B4] flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-4 h-4 text-[#B86A14]" aria-hidden="true" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-[#F59E0B]">
+              <p className="text-sm font-bold text-[#8A4F0B]">
                 Heavy Cashflow Cluster:{' '}
                 {timeline.heavyWeekCluster.chargeCount} bills due{' '}
                 {formatShortDate(timeline.heavyWeekCluster.startDateIso)} –{' '}
                 {formatShortDate(timeline.heavyWeekCluster.endDateIso)}
               </p>
-              <p className="text-xs text-[#94A3B8] font-mono tabular-nums">
+              <p className="text-xs text-[#6E5333] font-mono tabular-nums">
                 {Math.round(timeline.heavyWeekCluster.shareOfMonth * 100)}% of monthly outflow (
                 {formatMinorUnits(
                   timeline.heavyWeekCluster.totalBaseMinorUnits,
                   settings.baseCurrency,
-                  { showDecimals: settings.baseCurrency !== 'PKR' },
+                  { showDecimals },
                 )}
                 ) lands in one 7-day window
               </p>
@@ -150,23 +257,22 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         </div>
       )}
 
-      {/* Calendar Grid + Day Inspector Drawer */}
+      {/* Calendar Grid + Day Inspector */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Monthly Calendar Grid */}
         <section
-          className="lg:col-span-7 rounded-2xl bg-[#111623] border border-[#232D42] p-4 sm:p-5"
+          className="lg:col-span-7 rounded-2xl vault-surface p-4 sm:p-5"
           aria-label={`Calendar for ${formatMonthYear(viewYear, viewMonth)}`}
         >
-          <div className="flex items-center justify-between pb-4 mb-4 border-b border-[#232D42]">
+          <div className="flex items-center justify-between pb-4 mb-4 border-b border-[#EEF1EC]">
             <div>
-              <p className="text-xs text-[#94A3B8]">Projected Month Total</p>
-              <p className="mt-0.5 font-mono tabular-nums text-xl font-bold text-[#F8FAFC]">
+              <p className="text-xs text-[#5B6662]">Projected Month Total</p>
+              <p className="mt-0.5 font-mono tabular-nums text-xl font-bold text-[#17211E]">
                 {formatMinorUnits(timeline.totalMonthBaseMinorUnits, settings.baseCurrency, {
-                  showDecimals: settings.baseCurrency !== 'PKR',
+                  showDecimals,
                 })}
               </p>
             </div>
-            <p className="text-xs text-[#94A3B8] font-mono tabular-nums">
+            <p className="text-xs text-[#5B6662] font-mono tabular-nums">
               {timeline.totalChargesCount}{' '}
               {timeline.totalChargesCount === 1 ? 'charge' : 'charges'}
             </p>
@@ -176,7 +282,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
             {WEEKDAYS.map((day) => (
               <div
                 key={day}
-                className="text-center text-[11px] font-semibold text-[#64748B] py-1"
+                className="text-center text-[11px] font-semibold text-[#85918C] py-1"
               >
                 {day}
               </div>
@@ -204,35 +310,25 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                     cell.charges.length === 1 ? 'bill' : 'bills'
                   }`}
                   aria-pressed={isSelected}
-                  className={`h-14 sm:h-16 rounded-xl p-1.5 flex flex-col items-center justify-between border transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-[#6366F1] ${
+                  className={`h-14 sm:h-16 rounded-xl p-1.5 flex flex-col items-center justify-between border transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-[#1E6B58] ${
                     isSelected
-                      ? 'bg-[#6366F1]/20 border-[#6366F1]'
+                      ? 'bg-[#E6F2EE] border-[#1E6B58]'
                       : isToday
-                        ? 'bg-[#1A2234] border-[#6366F1]/50'
+                        ? 'bg-[#F5F6F3] border-[#1E6B58]/50'
                         : hasCharges
-                          ? 'bg-[#161D2E] border-[#232D42] hover:border-[#475569]'
-                          : 'bg-[#0B101B]/60 border-transparent hover:border-[#232D42]'
+                          ? 'bg-[#FAFBF9] border-[#E4E7E1] hover:border-[#B9C5BC]'
+                          : 'bg-transparent border-transparent hover:bg-[#F5F6F3]'
                   }`}
-                  style={
-                    !isSelected && hasCharges && cell.intensity > 0
-                      ? {
-                          boxShadow: `inset 0 0 18px rgba(99, 102, 241, ${(
-                            0.08 +
-                            cell.intensity * 0.14
-                          ).toFixed(2)})`,
-                        }
-                      : undefined
-                  }
                 >
                   <span
                     className={`font-mono tabular-nums text-xs font-semibold ${
                       isSelected
-                        ? 'text-white'
+                        ? 'text-[#155243]'
                         : isToday
-                          ? 'text-[#818CF8]'
+                          ? 'text-[#1E6B58]'
                           : hasCharges
-                            ? 'text-[#F8FAFC]'
-                            : 'text-[#64748B]'
+                            ? 'text-[#17211E]'
+                            : 'text-[#85918C]'
                     }`}
                   >
                     {cell.dayOfMonth}
@@ -250,7 +346,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                       />
                     ))}
                     {extraCount > 0 && (
-                      <span className="text-[9px] font-mono text-[#94A3B8]">+{extraCount}</span>
+                      <span className="text-[9px] font-mono text-[#5B6662]">+{extraCount}</span>
                     )}
                   </div>
                 </button>
@@ -261,24 +357,24 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
 
         {/* Day Inspector Panel */}
         <aside
-          className="lg:col-span-5 rounded-2xl bg-[#111623] border border-[#232D42] p-5"
+          className="lg:col-span-5 rounded-2xl vault-surface p-5"
           aria-label="Selected day charges"
           data-testid="day-inspector"
         >
-          <div className="flex items-baseline justify-between gap-3 pb-4 border-b border-[#232D42]">
+          <div className="flex items-baseline justify-between gap-3 pb-4 border-b border-[#EEF1EC]">
             <div>
-              <p className="text-xs text-[#94A3B8]">Day Inspector</p>
-              <h2 className="mt-0.5 text-lg font-bold text-[#F8FAFC]">
+              <p className="text-xs text-[#5B6662]">Day Inspector</p>
+              <h2 className="mt-0.5 text-lg font-bold text-[#17211E]">
                 {selectedDay ? formatShortDate(selectedDay.dateIso) : 'Select a day'}
               </h2>
             </div>
             <div className="text-right">
-              <p className="text-xs text-[#94A3B8]">Daily Outflow</p>
-              <p className="mt-0.5 font-mono tabular-nums text-base font-bold text-[#F8FAFC]">
+              <p className="text-xs text-[#5B6662]">Daily Outflow</p>
+              <p className="mt-0.5 font-mono tabular-nums text-base font-bold text-[#17211E]">
                 {formatMinorUnits(
                   selectedDay?.totalBaseMinorUnits ?? 0,
                   settings.baseCurrency,
-                  { showDecimals: settings.baseCurrency !== 'PKR' },
+                  { showDecimals },
                 )}
               </p>
             </div>
@@ -286,8 +382,8 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
 
           {!selectedDay || selectedDay.charges.length === 0 ? (
             <div className="py-10 text-center">
-              <p className="text-sm font-semibold text-[#F8FAFC]">No charges scheduled</p>
-              <p className="mt-1 text-xs text-[#94A3B8]">
+              <p className="text-sm font-bold text-[#17211E]">No charges scheduled</p>
+              <p className="mt-1 text-xs text-[#5B6662]">
                 Select any highlighted day on the calendar to inspect its recurring bills.
               </p>
             </div>
@@ -300,32 +396,32 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                 return (
                   <li
                     key={`${sub.id}-${charge.dateIso}`}
-                    className="rounded-xl bg-[#0B101B] border border-[#232D42] p-3.5 flex items-center gap-3"
+                    className="rounded-xl bg-[#F5F6F3] border border-[#E4E7E1] p-3.5 flex items-center gap-3"
                   >
                     <div
                       className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                      style={{ backgroundColor: `${visual.color}1F` }}
+                      style={{ backgroundColor: `${visual.color}16` }}
                     >
                       <Icon className="w-4 h-4" style={{ color: visual.color }} aria-hidden="true" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-[#F8FAFC] truncate">{sub.name}</p>
-                      <p className="text-xs text-[#94A3B8]">
+                      <p className="text-sm font-bold text-[#17211E] truncate">{sub.name}</p>
+                      <p className="text-xs text-[#5B6662]">
                         {visual.label} · {BILLING_CYCLES[sub.cycle].label}
                         {sub.isFreeTrial ? ' · Free trial' : ''}
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="font-mono tabular-nums text-sm font-bold text-[#F8FAFC]">
+                      <p className="font-mono tabular-nums text-sm font-bold text-[#17211E]">
                         {formatMinorUnits(charge.baseAmountMinorUnits, settings.baseCurrency, {
-                          showDecimals: settings.baseCurrency !== 'PKR',
+                          showDecimals,
                         })}
                       </p>
                       <button
                         type="button"
                         onClick={() => onEditSubscription(sub.id)}
                         aria-label={`Edit ${sub.name}`}
-                        className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-medium text-[#6366F1] hover:text-[#818CF8] cursor-pointer"
+                        className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[#1E6B58] hover:text-[#155243] cursor-pointer"
                       >
                         <Pencil className="w-3 h-3" aria-hidden="true" />
                         <span>Edit</span>

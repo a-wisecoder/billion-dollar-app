@@ -37,11 +37,16 @@ export const RunwayCeilingModal: React.FC<RunwayCeilingModalProps> = ({
 
   const defaultCeiling = CURRENCIES[baseCurrency].defaultMonthlyCeilingMinorUnits;
   const minSlider = Math.max(1000, Math.round(defaultCeiling * 0.25));
-  const maxSlider = Math.max(defaultCeiling * 5, activeMonthlyBaseMinorUnits * 2, currentCeilingMinorUnits * 2);
+  const maxSlider = Math.max(
+    defaultCeiling * 5,
+    activeMonthlyBaseMinorUnits * 2,
+    currentCeilingMinorUnits * 2,
+  );
   const stepSlider = Math.max(500, Math.round(defaultCeiling * 0.05));
 
   const parsedMinor = parseDecimalToMinorUnits(inputVal) ?? currentCeilingMinorUnits;
-  const previewRatio = parsedMinor > 0 ? Math.round((activeMonthlyBaseMinorUnits / parsedMinor) * 100) : 0;
+  const previewRatio =
+    parsedMinor > 0 ? Math.round((activeMonthlyBaseMinorUnits / parsedMinor) * 100) : 0;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,7 +61,7 @@ export const RunwayCeilingModal: React.FC<RunwayCeilingModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm p-0 sm:p-4"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#17211E]/40 backdrop-blur-[2px] p-0 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="ceiling-modal-title"
@@ -64,16 +69,16 @@ export const RunwayCeilingModal: React.FC<RunwayCeilingModalProps> = ({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-md rounded-t-3xl sm:rounded-2xl bg-[#111623] border border-[#232D42] p-5 sm:p-6 shadow-2xl">
+      <div className="w-full max-w-md rounded-t-3xl sm:rounded-2xl bg-white border border-[#E4E7E1] p-5 sm:p-6 shadow-xl">
         <div className="flex items-center justify-between gap-4">
-          <h2 id="ceiling-modal-title" className="text-lg font-bold text-[#F8FAFC]">
+          <h2 id="ceiling-modal-title" className="text-lg font-bold text-[#17211E]">
             Monthly Runway Ceiling
           </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close ceiling editor"
-            className="min-h-[40px] min-w-[40px] rounded-lg bg-[#1A2234] border border-[#232D42] text-[#94A3B8] hover:text-[#F8FAFC] flex items-center justify-center cursor-pointer"
+            className="min-h-[38px] min-w-[38px] rounded-xl bg-[#F5F6F3] border border-[#E4E7E1] text-[#5B6662] hover:text-[#17211E] flex items-center justify-center cursor-pointer"
           >
             <X className="w-4 h-4" aria-hidden="true" />
           </button>
@@ -81,17 +86,17 @@ export const RunwayCeilingModal: React.FC<RunwayCeilingModalProps> = ({
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-5" noValidate>
           {error && (
-            <p role="alert" className="text-xs font-medium text-[#FCA5A5]">
+            <p role="alert" className="text-xs font-medium text-[#A63535]">
               {error}
             </p>
           )}
 
           <div>
             <div className="flex items-baseline justify-between mb-2">
-              <label htmlFor="ceiling-input" className="text-xs font-semibold text-[#94A3B8]">
+              <label htmlFor="ceiling-input" className="text-xs font-semibold text-[#5B6662]">
                 Target monthly limit ({baseCurrency})
               </label>
-              <span className="text-xs font-mono tabular-nums text-[#94A3B8]">
+              <span className="text-xs font-mono tabular-nums text-[#5B6662]">
                 Current burn: {previewRatio}%
               </span>
             </div>
@@ -108,7 +113,7 @@ export const RunwayCeilingModal: React.FC<RunwayCeilingModalProps> = ({
                   if (error) setError(null);
                 }
               }}
-              className="w-full h-12 px-4 rounded-xl bg-[#1A2234] border border-[#232D42] font-mono tabular-nums text-lg font-bold text-[#F8FAFC] focus:outline-none focus:border-[#6366F1]"
+              className="w-full h-12 px-4 rounded-xl bg-[#F5F6F3] border border-[#E4E7E1] font-mono tabular-nums text-lg font-bold text-[#17211E] focus:outline-none focus:bg-white focus:border-[#1E6B58]"
             />
           </div>
 
@@ -126,7 +131,7 @@ export const RunwayCeilingModal: React.FC<RunwayCeilingModalProps> = ({
               }}
               className="w-full vault-slider"
             />
-            <div className="mt-1.5 flex justify-between font-mono tabular-nums text-[11px] text-[#94A3B8]">
+            <div className="mt-1.5 flex justify-between font-mono tabular-nums text-[11px] text-[#5B6662]">
               <span>{formatMinorUnits(minSlider, baseCurrency, { showDecimals: false })}</span>
               <span>{formatMinorUnits(maxSlider, baseCurrency, { showDecimals: false })}</span>
             </div>
@@ -136,13 +141,13 @@ export const RunwayCeilingModal: React.FC<RunwayCeilingModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 h-11 rounded-xl bg-[#1A2234] border border-[#232D42] text-sm font-semibold text-[#F8FAFC] cursor-pointer"
+              className="flex-1 h-11 rounded-xl bg-[#F5F6F3] border border-[#E4E7E1] text-sm font-semibold text-[#17211E] cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="flex-[2] h-11 rounded-xl bg-[#6366F1] hover:bg-[#5558E6] text-sm font-semibold text-white cursor-pointer"
+              className="flex-[2] h-11 rounded-xl bg-[#1E6B58] hover:bg-[#175747] text-sm font-semibold text-white cursor-pointer"
             >
               Save Ceiling
             </button>

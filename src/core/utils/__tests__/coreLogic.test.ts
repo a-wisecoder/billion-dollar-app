@@ -11,7 +11,11 @@ import {
   daysUntilRenewal,
   projectBillingDatesInMonth,
 } from '../dateMath';
-import { exportVaultBackup, parseVaultBackup } from '../backupService';
+import {
+  exportSubscriptionsJson,
+  exportVaultBackup,
+  parseVaultBackup,
+} from '../backupService';
 import {
   createDefaultSettings,
   getAnnualMinorUnits,
@@ -232,6 +236,18 @@ test('backupService exports and round-trips valid backups and rejects malformed 
     assert.equal(parsed.data.subscriptions[0].amountMinorUnits, 2499);
     assert.equal(parsed.data.subscriptions[0].isFreeTrial, true);
   }
+
+  const subsOnlyJson = exportSubscriptionsJson(subs);
+  const rawObj = JSON.parse(subsOnlyJson) as {
+    schemaVersion: number;
+    count: number;
+    subscriptions: Subscription[];
+  };
+  assert.equal(rawObj.schemaVersion, 1);
+  assert.equal(rawObj.count, 1);
+  assert.equal(rawObj.subscriptions[0].name, 'Cloud VPS');
+  const parsedSubsOnly = parseVaultBackup(subsOnlyJson);
+  assert.equal(parsedSubsOnly.ok, true);
 
   const badJson = parseVaultBackup('{ broken json');
   assert.equal(badJson.ok, false);

@@ -1,13 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarDays,
-  Gamepad2,
+  LayoutGrid,
   MapPin,
   Plus,
-  Radar,
+  SearchCheck,
   ShieldCheck,
   Undo2,
 } from 'lucide-react';
+import {
+  computeLeakAudit,
+  type ParsedStatementCandidate,
+} from './features/audit/domain/auditEngine';
+import { AuditAndImportView } from './features/audit/presentation/AuditAndImportView';
+import { CancelKitModal } from './features/audit/presentation/CancelKitModal';
 import {
   loadVaultState,
   saveSettings,
@@ -18,6 +24,7 @@ import { createSeedSubscriptions } from './features/cashflow/domain/presets';
 import type {
   Subscription,
   SubscriptionCategory,
+  UsageFrequency,
   VaultSettings,
 } from './features/cashflow/domain/subscription';
 import { RadarDashboardView } from './features/cashflow/presentation/RadarDashboardView';
@@ -31,17 +38,17 @@ import { SpendMapView } from './features/maps/presentation/SpendMapView';
 import { TimelineView } from './features/timeline/presentation/TimelineView';
 import { VaultSettingsView } from './features/vault/presentation/VaultSettingsView';
 
-type TabId = 'radar' | 'timeline' | 'map' | 'arcade' | 'vault';
+type TabId = 'radar' | 'timeline' | 'audit' | 'map' | 'vault' | 'arcade';
 
 const NAV_TABS: readonly {
-  readonly id: TabId;
+  readonly id: Exclude<TabId, 'arcade'>;
   readonly label: string;
   readonly Icon: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
 }[] = [
-  { id: 'radar', label: 'Radar', Icon: Radar },
+  { id: 'radar', label: 'Overview', Icon: LayoutGrid },
   { id: 'timeline', label: 'Timeline', Icon: CalendarDays },
+  { id: 'audit', label: 'Audit', Icon: SearchCheck },
   { id: 'map', label: 'Map', Icon: MapPin },
-  { id: 'arcade', label: 'Arcade', Icon: Gamepad2 },
   { id: 'vault', label: 'Vault', Icon: ShieldCheck },
 ];
 
@@ -58,6 +65,7 @@ function getInitialRouteParams(): { tab: TabId; autostartGame: boolean } {
   if (
     tabParam === 'radar' ||
     tabParam === 'timeline' ||
+    tabParam === 'audit' ||
     tabParam === 'map' ||
     tabParam === 'arcade' ||
     tabParam === 'vault'
@@ -86,6 +94,7 @@ export const App: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [prefillDraft, setPrefillDraft] = useState<SubscriptionPrefillDraft | null>(null);
   const [ceilingModalOpen, setCeilingModalOpen] = useState(false);
+  const [cancelKitSubId, setCancelKitSubId] = useState<string | null>(null);
 
   const [undoToast, setUndoToast] = useState<{ readonly sub: Subscription } | null>(null);
   const undoTimerRef = useRef<number | null>(null);
@@ -122,7 +131,11 @@ export const App: React.FC = () => {
     [subscriptions, settings, selectedCategory, showAnnual, searchQuery],
   );
 
-  // Clear selected category if all active bills in that category were deleted/archived
+  const audit = useMemo(
+    () => computeLeakAudit(subscriptions, settings),
+    [subscriptions, settings],
+  );
+
   useEffect(() => {
     if (
       selectedCategory &&
@@ -135,6 +148,12 @@ export const App: React.FC = () => {
   const editingSubscription = useMemo(
     () => (editingId ? (subscriptions.find((s) => s.id === editingId) ?? null) : null),
     [editingId, subscriptions],
+  );
+
+  const cancelKitSubscription = useMemo(
+    () =>
+      cancelKitSubId ? (subscriptions.find((s) => s.id === cancelKitSubId) ?? null) : null,
+    [cancelKitSubId, subscriptions],
   );
 
   const openAddModal = () => {
@@ -173,6 +192,63 @@ export const App: React.FC = () => {
           : item,
       ),
     );
+  };
+
+  const handleUpdateUsageFrequency = (id: string, usageFrequency: UsageFrequency) => {
+    setSubscriptions((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, usageFrequency } : item)),
+    );
+  };
+
+  const handleArchiveSubscription = (id: string) => {
+    setSubscriptions((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, isSimulatedPaused: false, isArchived: true } : item,
+      ),
+    );
+  };
+
+  const handleImportStatementCandidates = (
+    candidates: readonly ParsedStatementCandidate[],
+  ) => {
+    setSubscriptions((prev) => {
+      const next = [...prev];
+      const nowStamp = Date.now();
+      candidates.forEach((cand, idx) => {
+        if (cand.matchedExistingId) {
+          const matchIdx = next.findIndex((s) => s.id === cand.matchedExistingId);
+          if (matchIdx >= 0) {
+            const existing = next[matchIdx];
+            next[matchIdx] = {
+              ...existing,
+              previousAmountMinorUnits:
+                cand.amountMinorUnits > existing.amountMinorUnits
+                  ? existing.amountMinorUnits
+                  : existing.previousAmountMinorUnits,
+              amountMinorUnits: cand.amountMinorUnits,
+              nextBillingDate: cand.nextBillingDate,
+              isArchived: false,
+            };
+            return;
+          }
+        }
+        next.push({
+          id: `sub_import_${nowStamp}_${idx}`,
+          name: cand.name,
+          amountMinorUnits: cand.amountMinorUnits,
+          currency: cand.currency,
+          cycle: cand.cycle,
+          category: cand.category,
+          nextBillingDate: cand.nextBillingDate,
+          isFreeTrial: false,
+          isSimulatedPaused: false,
+          isArchived: false,
+          usageFrequency: 'weekly',
+          notes: 'Imported from statement scan',
+        });
+      });
+      return next;
+    });
   };
 
   const handleResetSimulations = () => {
@@ -239,7 +315,7 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#080B12] text-[#F8FAFC] flex flex-col">
+    <div className="min-h-screen bg-[#F5F6F3] text-[#17211E] flex flex-col">
       {/* Case A Demo Key Google Maps Platform Quota Notice */}
       {gmpQuotaExceeded && (
         <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
@@ -258,17 +334,17 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {/* Strict 3-Zone Top Bar */}
-      <header className="sticky top-0 z-30 bg-[#080B12]/90 backdrop-blur-md border-b border-[#232D42]">
+      {/* Strict 3-Zone Top Bar (Soft Daylight Editorial Header) */}
+      <header className="sticky top-0 z-30 bg-[#F5F6F3]/90 backdrop-blur-md border-b border-[#E4E7E1]">
         <div className="max-w-6xl mx-auto h-16 px-4 sm:px-6 flex items-center justify-between gap-8">
           {/* Zone 1: Brand Wordmark */}
           <a
-            href="#radar"
+            href="#overview"
             onClick={(e) => {
               e.preventDefault();
               setActiveTab('radar');
             }}
-            className="text-lg font-extrabold tracking-tight text-[#F8FAFC] whitespace-nowrap shrink-0"
+            className="text-lg font-extrabold tracking-tight text-[#17211E] whitespace-nowrap shrink-0"
           >
             VaultFlow
           </a>
@@ -285,20 +361,17 @@ export const App: React.FC = () => {
                   key={id}
                   type="button"
                   aria-current={active ? 'page' : undefined}
-                  onClick={() => {
-                    if (id === 'arcade') setGameAutostart(false);
-                    setActiveTab(id);
-                  }}
-                  className={`relative py-1 text-sm font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#6366F1] ${
+                  onClick={() => setActiveTab(id)}
+                  className={`relative py-1 text-sm font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#1E6B58] ${
                     active
-                      ? 'text-[#F8FAFC]'
-                      : 'text-[#94A3B8] hover:text-[#F8FAFC]'
+                      ? 'text-[#17211E]'
+                      : 'text-[#5B6662] hover:text-[#17211E]'
                   }`}
                 >
                   {label}
                   {active && (
                     <span
-                      className="absolute left-0 right-0 -bottom-[21px] h-0.5 bg-[#6366F1]"
+                      className="absolute left-0 right-0 -bottom-[21px] h-0.5 bg-[#1E6B58]"
                       aria-hidden="true"
                     />
                   )}
@@ -312,7 +385,7 @@ export const App: React.FC = () => {
             <button
               type="button"
               onClick={openAddModal}
-              className="min-h-[40px] px-4 py-2 rounded-xl bg-[#6366F1] hover:bg-[#5558E6] text-xs font-semibold text-white flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#6366F1]"
+              className="min-h-[38px] px-4 py-2 rounded-xl bg-[#1E6B58] hover:bg-[#175747] text-xs font-semibold text-white flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1E6B58]"
             >
               <Plus className="w-4 h-4" aria-hidden="true" />
               <span>Add Bill</span>
@@ -326,6 +399,7 @@ export const App: React.FC = () => {
         {activeTab === 'radar' && (
           <RadarDashboardView
             summary={summary}
+            audit={audit}
             settings={settings}
             selectedCategory={selectedCategory}
             showAnnual={showAnnual}
@@ -334,6 +408,8 @@ export const App: React.FC = () => {
             onToggleAnnual={setShowAnnual}
             onSearchChange={setSearchQuery}
             onToggleSimulate={handleToggleSimulate}
+            onUpdateUsage={handleUpdateUsageFrequency}
+            onOpenCancelKit={setCancelKitSubId}
             onResetSimulations={handleResetSimulations}
             onCommitSimulations={handleCommitSimulations}
             onRestoreArchived={handleRestoreArchived}
@@ -341,6 +417,7 @@ export const App: React.FC = () => {
             onEditClick={openEditModal}
             onDeleteClick={handleDeleteSubscription}
             onEditCeilingClick={() => setCeilingModalOpen(true)}
+            onOpenAuditTab={() => setActiveTab('audit')}
           />
         )}
 
@@ -349,6 +426,17 @@ export const App: React.FC = () => {
             subscriptions={subscriptions}
             settings={settings}
             onEditSubscription={openEditModal}
+          />
+        )}
+
+        {activeTab === 'audit' && (
+          <AuditAndImportView
+            subscriptions={subscriptions}
+            audit={audit}
+            settings={settings}
+            onOpenCancelKit={setCancelKitSubId}
+            onToggleSimulate={handleToggleSimulate}
+            onImportCandidates={handleImportStatementCandidates}
           />
         )}
 
@@ -374,14 +462,18 @@ export const App: React.FC = () => {
               setSubscriptions([]);
               setSelectedCategory(null);
             }}
+            onLaunchArcade={() => {
+              setGameAutostart(false);
+              setActiveTab('arcade');
+            }}
           />
         )}
       </main>
 
-      {/* Mobile Fixed Thumb-Zone Bottom Tab Bar */}
+      {/* Mobile Pinned Thumb-Zone Bottom Tab Bar */}
       <nav
         aria-label="Mobile navigation"
-        className="md:hidden fixed bottom-0 left-0 right-0 z-30 h-16 bg-[#0B101B]/95 backdrop-blur-md border-t border-[#232D42] grid grid-cols-5 items-center px-1"
+        className="md:hidden sticky bottom-0 inset-x-0 z-40 w-full min-h-16 pb-[env(safe-area-inset-bottom)] bg-white/95 backdrop-blur-md border-t border-[#DCE1D9] shadow-[0_-6px_20px_-8px_rgba(23,33,30,0.12)] grid grid-cols-5 items-center px-1"
       >
         {NAV_TABS.map(({ id, label, Icon }) => {
           const active = activeTab === id;
@@ -390,12 +482,9 @@ export const App: React.FC = () => {
               key={id}
               type="button"
               aria-current={active ? 'page' : undefined}
-              onClick={() => {
-                if (id === 'arcade') setGameAutostart(false);
-                setActiveTab(id);
-              }}
+              onClick={() => setActiveTab(id)}
               className={`min-h-[48px] flex flex-col items-center justify-center gap-1 rounded-xl transition-colors cursor-pointer ${
-                active ? 'text-[#6366F1]' : 'text-[#94A3B8] hover:text-[#F8FAFC]'
+                active ? 'text-[#1E6B58]' : 'text-[#5B6662] hover:text-[#17211E]'
               }`}
             >
               <Icon className="w-5 h-5" aria-hidden={true} />
@@ -411,15 +500,15 @@ export const App: React.FC = () => {
           role="status"
           aria-live="assertive"
           data-testid="undo-toast"
-          className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-40 rounded-xl bg-[#1A2234] border border-[#334155] px-4 py-3 shadow-2xl flex items-center gap-4"
+          className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-40 rounded-xl bg-[#17211E] text-white px-4 py-3 shadow-xl flex items-center gap-4"
         >
-          <span className="text-xs font-medium text-[#F8FAFC]">
+          <span className="text-xs font-medium">
             Removed {undoToast.sub.name}
           </span>
           <button
             type="button"
             onClick={handleUndoDelete}
-            className="min-h-[32px] px-2.5 py-1 rounded-lg bg-[#6366F1] hover:bg-[#5558E6] text-xs font-semibold text-white flex items-center gap-1 cursor-pointer"
+            className="min-h-[30px] px-2.5 py-1 rounded-lg bg-[#1E6B58] hover:bg-[#175747] text-xs font-semibold text-white flex items-center gap-1 cursor-pointer"
           >
             <Undo2 className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Undo</span>
@@ -449,6 +538,12 @@ export const App: React.FC = () => {
         onSave={(newCeiling) =>
           setSettings((prev) => ({ ...prev, monthlyCeilingMinorUnits: newCeiling }))
         }
+      />
+
+      <CancelKitModal
+        subscription={cancelKitSubscription}
+        onClose={() => setCancelKitSubId(null)}
+        onArchiveSubscription={handleArchiveSubscription}
       />
     </div>
   );

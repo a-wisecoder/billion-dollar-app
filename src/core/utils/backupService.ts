@@ -2,11 +2,13 @@ import {
   BILLING_CYCLE_LIST,
   CATEGORY_LIST,
   CURRENCY_CODES,
+  USAGE_FREQUENCY_LIST,
   createDefaultSettings,
   type BillingCycle,
   type CurrencyCode,
   type Subscription,
   type SubscriptionCategory,
+  type UsageFrequency,
   type VaultSettings,
 } from '../../features/cashflow/domain/subscription';
 import { parseIsoDate } from './dateMath';
@@ -21,6 +23,25 @@ export interface VaultBackupPayload {
 export type BackupParseResult =
   | { readonly ok: true; readonly data: VaultBackupPayload }
   | { readonly ok: false; readonly error: string };
+
+export interface SubscriptionsExportPayload {
+  readonly schemaVersion: 1;
+  readonly exportedAt: string;
+  readonly count: number;
+  readonly subscriptions: readonly Subscription[];
+}
+
+export function exportSubscriptionsJson(
+  subscriptions: readonly Subscription[],
+): string {
+  const payload: SubscriptionsExportPayload = {
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    count: subscriptions.length,
+    subscriptions,
+  };
+  return JSON.stringify(payload, null, 2);
+}
 
 export function exportVaultBackup(
   subscriptions: readonly Subscription[],
@@ -49,6 +70,10 @@ function isBillingCycle(value: unknown): value is BillingCycle {
 
 function isCategory(value: unknown): value is SubscriptionCategory {
   return typeof value === 'string' && (CATEGORY_LIST as readonly string[]).includes(value);
+}
+
+function isUsageFrequency(value: unknown): value is UsageFrequency {
+  return typeof value === 'string' && (USAGE_FREQUENCY_LIST as readonly string[]).includes(value);
 }
 
 export function parseVaultBackup(rawJson: string): BackupParseResult {
@@ -124,10 +149,24 @@ export function parseVaultBackup(rawJson: string): BackupParseResult {
       };
     }
 
+    const previousAmountMinorUnits =
+      typeof item.previousAmountMinorUnits === 'number' &&
+      Number.isInteger(item.previousAmountMinorUnits) &&
+      item.previousAmountMinorUnits > 0
+        ? item.previousAmountMinorUnits
+        : undefined;
+
+    const usageFrequency = isUsageFrequency(item.usageFrequency) ? item.usageFrequency : undefined;
+    const cancelUrl =
+      typeof item.cancelUrl === 'string' && /^https?:\/\//i.test(item.cancelUrl.trim())
+        ? item.cancelUrl.trim()
+        : undefined;
+
     subscriptions.push({
       id: item.id.trim(),
       name: item.name.trim(),
       amountMinorUnits: item.amountMinorUnits,
+      ...(previousAmountMinorUnits !== undefined ? { previousAmountMinorUnits } : {}),
       currency: item.currency,
       cycle: item.cycle,
       category: item.category,
@@ -135,6 +174,8 @@ export function parseVaultBackup(rawJson: string): BackupParseResult {
       isFreeTrial: Boolean(item.isFreeTrial),
       isSimulatedPaused: Boolean(item.isSimulatedPaused),
       isArchived: Boolean(item.isArchived),
+      ...(usageFrequency !== undefined ? { usageFrequency } : {}),
+      ...(cancelUrl !== undefined ? { cancelUrl } : {}),
       notes: typeof item.notes === 'string' ? item.notes.trim() : '',
     });
   }
@@ -161,6 +202,13 @@ export function parseVaultBackup(rawJson: string): BackupParseResult {
         ? s.monthlyCeilingMinorUnits
         : defaults.monthlyCeilingMinorUnits;
 
+    const monthlyIncomeMinorUnits =
+      typeof s.monthlyIncomeMinorUnits === 'number' &&
+      Number.isInteger(s.monthlyIncomeMinorUnits) &&
+      s.monthlyIncomeMinorUnits > 0
+        ? s.monthlyIncomeMinorUnits
+        : defaults.monthlyIncomeMinorUnits;
+
     const lead =
       s.reminderLeadDays === 1 || s.reminderLeadDays === 2 || s.reminderLeadDays === 3
         ? s.reminderLeadDays
@@ -170,6 +218,7 @@ export function parseVaultBackup(rawJson: string): BackupParseResult {
       baseCurrency,
       exchangeRatesPerUsd: rates,
       monthlyCeilingMinorUnits: ceiling,
+      monthlyIncomeMinorUnits,
       notificationsEnabled:
         typeof s.notificationsEnabled === 'boolean'
           ? s.notificationsEnabled

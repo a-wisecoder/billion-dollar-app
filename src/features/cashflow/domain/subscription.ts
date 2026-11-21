@@ -9,11 +9,15 @@ export type SubscriptionCategory =
   | 'utilities'
   | 'health';
 
+export type UsageFrequency = 'daily' | 'weekly' | 'rarely' | 'unused';
+
 export interface Subscription {
   readonly id: string;
   readonly name: string;
   /** Exact price in minor units (e.g., $19.99 -> 1999). Never floating point. */
   readonly amountMinorUnits: number;
+  /** Optional prior billed amount to automatically surface price hikes. */
+  readonly previousAmountMinorUnits?: number;
   readonly currency: CurrencyCode;
   readonly cycle: BillingCycle;
   readonly category: SubscriptionCategory;
@@ -22,8 +26,27 @@ export interface Subscription {
   readonly isFreeTrial: boolean;
   readonly isSimulatedPaused: boolean;
   readonly isArchived: boolean;
+  readonly usageFrequency?: UsageFrequency;
+  readonly cancelUrl?: string;
   readonly notes: string;
 }
+
+export const USAGE_FREQUENCY_META: Record<
+  UsageFrequency,
+  { readonly label: string; readonly monthlyUses: number; readonly tone: string }
+> = {
+  daily: { label: 'Daily', monthlyUses: 24, tone: '#1E7E5F' },
+  weekly: { label: 'Weekly', monthlyUses: 6, tone: '#2A8C94' },
+  rarely: { label: 'Rarely', monthlyUses: 1.5, tone: '#B86A14' },
+  unused: { label: 'Unused', monthlyUses: 0, tone: '#C64545' },
+};
+
+export const USAGE_FREQUENCY_LIST: readonly UsageFrequency[] = [
+  'daily',
+  'weekly',
+  'rarely',
+  'unused',
+];
 
 export interface CurrencyMeta {
   readonly code: CurrencyCode;
@@ -31,6 +54,7 @@ export interface CurrencyMeta {
   readonly symbol: string;
   readonly defaultRatePerUsd: number;
   readonly defaultMonthlyCeilingMinorUnits: number;
+  readonly defaultMonthlyIncomeMinorUnits: number;
 }
 
 export const CURRENCIES: Record<CurrencyCode, CurrencyMeta> = {
@@ -40,6 +64,7 @@ export const CURRENCIES: Record<CurrencyCode, CurrencyMeta> = {
     symbol: '$',
     defaultRatePerUsd: 1,
     defaultMonthlyCeilingMinorUnits: 20000,
+    defaultMonthlyIncomeMinorUnits: 450000,
   },
   PKR: {
     code: 'PKR',
@@ -47,6 +72,7 @@ export const CURRENCIES: Record<CurrencyCode, CurrencyMeta> = {
     symbol: 'Rs ',
     defaultRatePerUsd: 278.5,
     defaultMonthlyCeilingMinorUnits: 5500000,
+    defaultMonthlyIncomeMinorUnits: 35000000,
   },
   EUR: {
     code: 'EUR',
@@ -54,6 +80,7 @@ export const CURRENCIES: Record<CurrencyCode, CurrencyMeta> = {
     symbol: '€',
     defaultRatePerUsd: 0.92,
     defaultMonthlyCeilingMinorUnits: 18500,
+    defaultMonthlyIncomeMinorUnits: 410000,
   },
   GBP: {
     code: 'GBP',
@@ -61,6 +88,7 @@ export const CURRENCIES: Record<CurrencyCode, CurrencyMeta> = {
     symbol: '£',
     defaultRatePerUsd: 0.79,
     defaultMonthlyCeilingMinorUnits: 16000,
+    defaultMonthlyIncomeMinorUnits: 360000,
   },
   AED: {
     code: 'AED',
@@ -68,6 +96,7 @@ export const CURRENCIES: Record<CurrencyCode, CurrencyMeta> = {
     symbol: 'AED ',
     defaultRatePerUsd: 3.6725,
     defaultMonthlyCeilingMinorUnits: 73500,
+    defaultMonthlyIncomeMinorUnits: 1650000,
   },
 };
 
@@ -106,11 +135,11 @@ export interface CategoryMeta {
 }
 
 export const CATEGORIES: Record<SubscriptionCategory, CategoryMeta> = {
-  aiAndCloud: { id: 'aiAndCloud', label: 'AI & Cloud', color: '#6366F1' },
-  streaming: { id: 'streaming', label: 'Media', color: '#EC4899' },
-  productivity: { id: 'productivity', label: 'Productivity', color: '#06B6D4' },
-  utilities: { id: 'utilities', label: 'Utilities', color: '#F59E0B' },
-  health: { id: 'health', label: 'Health', color: '#10B981' },
+  aiAndCloud: { id: 'aiAndCloud', label: 'AI & Cloud', color: '#4E6EF2' },
+  streaming: { id: 'streaming', label: 'Media', color: '#D15C77' },
+  productivity: { id: 'productivity', label: 'Productivity', color: '#2A8C94' },
+  utilities: { id: 'utilities', label: 'Utilities', color: '#C97E24' },
+  health: { id: 'health', label: 'Health', color: '#2D8A68' },
 };
 
 export const CATEGORY_LIST: readonly SubscriptionCategory[] = [
@@ -127,6 +156,8 @@ export interface VaultSettings {
   readonly exchangeRatesPerUsd: Record<CurrencyCode, number>;
   /** Monthly runway ceiling stored in minor units of baseCurrency */
   readonly monthlyCeilingMinorUnits: number;
+  /** Optional monthly take-home income in minor units of baseCurrency for income-share tracking */
+  readonly monthlyIncomeMinorUnits?: number;
   readonly notificationsEnabled: boolean;
   readonly reminderLeadDays: 1 | 2 | 3;
 }
@@ -142,6 +173,7 @@ export function createDefaultSettings(): VaultSettings {
       AED: CURRENCIES.AED.defaultRatePerUsd,
     },
     monthlyCeilingMinorUnits: CURRENCIES.USD.defaultMonthlyCeilingMinorUnits,
+    monthlyIncomeMinorUnits: CURRENCIES.USD.defaultMonthlyIncomeMinorUnits,
     notificationsEnabled: true,
     reminderLeadDays: 2,
   };

@@ -30,21 +30,21 @@ export const WhatIfSavingsBanner: React.FC<WhatIfSavingsBannerProps> = ({
       role="status"
       aria-live="polite"
       data-testid="what-if-savings-banner"
-      className="rounded-2xl bg-[#10B981]/12 border border-[#10B981]/40 px-4 py-3.5 flex flex-wrap items-center justify-between gap-3"
+      className="rounded-2xl bg-[#E6F2EE] border border-[#B9DDD0] px-4 py-3.5 flex flex-wrap items-center justify-between gap-3"
     >
       <div className="flex items-center gap-3 min-w-0">
-        <div className="w-9 h-9 rounded-xl bg-[#10B981]/18 flex items-center justify-center shrink-0">
-          <Sparkles className="w-4 h-4 text-[#10B981]" aria-hidden="true" />
+        <div className="w-9 h-9 rounded-xl bg-white/90 border border-[#C6E2D8] flex items-center justify-center shrink-0">
+          <Sparkles className="w-4 h-4 text-[#1E6B58]" aria-hidden="true" />
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-[#10B981] font-mono tabular-nums">
+          <p className="text-sm font-bold text-[#155243] font-mono tabular-nums">
             What-If Savings Unlocked: +
             {formatMinorUnits(animatedSavings, baseCurrency, {
               showDecimals: baseCurrency !== 'PKR',
             })}
             /yr
           </p>
-          <p className="text-xs text-[#94A3B8]">
+          <p className="text-xs text-[#386559]">
             Simulating pause on {simulatedCount}{' '}
             {simulatedCount === 1 ? 'subscription' : 'subscriptions'}
           </p>
@@ -55,15 +55,15 @@ export const WhatIfSavingsBanner: React.FC<WhatIfSavingsBannerProps> = ({
         <button
           type="button"
           onClick={onReset}
-          className="min-h-[38px] px-3 py-1.5 rounded-lg bg-[#111623] border border-[#232D42] hover:border-[#94A3B8] text-xs font-semibold text-[#F8FAFC] flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-[#10B981]"
+          className="min-h-[36px] px-3 py-1.5 rounded-xl bg-white border border-[#C6E2D8] hover:border-[#1E6B58] text-xs font-semibold text-[#17211E] flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-[#1E6B58]"
         >
-          <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+          <RotateCcw className="w-3.5 h-3.5 text-[#5B6662]" aria-hidden="true" />
           <span>Reset</span>
         </button>
         <button
           type="button"
           onClick={onCommitArchive}
-          className="min-h-[38px] px-3 py-1.5 rounded-lg bg-[#10B981] hover:bg-[#0EA472] text-xs font-semibold text-[#04140E] flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-[#F8FAFC]"
+          className="min-h-[36px] px-3 py-1.5 rounded-xl bg-[#1E6B58] hover:bg-[#175747] text-xs font-semibold text-white flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer focus-visible:outline-2 focus-visible:outline-[#1E6B58]"
         >
           <Archive className="w-3.5 h-3.5" aria-hidden="true" />
           <span>Commit Pause</span>
