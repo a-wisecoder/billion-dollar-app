@@ -11,9 +11,9 @@ interface ServiceAvatarProps {
 }
 
 const SIZE_CLASSES: Record<'sm' | 'md' | 'lg', string> = {
-  sm: 'w-9 h-9 rounded-lg text-sm',
-  md: 'w-10 h-10 rounded-xl text-[15px]',
-  lg: 'w-11 h-11 rounded-xl text-base',
+  sm: 'w-9 h-9 rounded-[10px] text-[13px]',
+  md: 'w-10 h-10 rounded-[12px] text-[15px]',
+  lg: 'w-12 h-12 rounded-[14px] text-lg',
 };
 
 export const ServiceAvatar: React.FC<ServiceAvatarProps> = ({
@@ -43,7 +43,7 @@ export const ServiceAvatar: React.FC<ServiceAvatarProps> = ({
     return (
       <span
         aria-hidden="true"
-        className={`${sizeClass} shrink-0 overflow-hidden inline-flex items-center justify-center bg-subtle`}
+        className={`${sizeClass} shrink-0 overflow-hidden inline-flex items-center justify-center bg-subtle ring-1 ring-inset ring-black/[0.08] dark:ring-white/[0.1] shadow-[0_1px_2px_rgba(0,0,0,0.06)]`}
       >
         <img
           src={`/logos/${resolvedId}.svg`}
@@ -62,9 +62,9 @@ export const ServiceAvatar: React.FC<ServiceAvatarProps> = ({
   return (
     <span
       aria-hidden="true"
-      className={`${sizeClass} shrink-0 inline-flex items-center justify-center font-bold`}
+      className={`${sizeClass} shrink-0 inline-flex items-center justify-center font-display font-bold ring-1 ring-inset ring-black/[0.06] dark:ring-white/[0.08]`}
       style={{
-        backgroundColor: `${visual.color}1F`,
+        background: `linear-gradient(145deg, ${visual.color}24, ${visual.color}12)`,
         color: visual.color,
       }}
     >

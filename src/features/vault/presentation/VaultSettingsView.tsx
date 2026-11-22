@@ -13,10 +13,12 @@ import {
   FileSpreadsheet,
   Globe,
   KeyRound,
+  Mail,
   Monitor,
   Moon,
   RefreshCw,
   RotateCcw,
+  ShieldCheck,
   Smartphone,
   Sparkles,
   Sun,
@@ -24,8 +26,14 @@ import {
   Upload,
   Wallet,
 } from 'lucide-react';
+import { motion } from 'motion/react';
 import type { ThemeMode } from '../../../core/theme/themeService';
-import { exportVaultBackup, parseVaultBackup } from '../../../core/utils/backupService';
+import { Button, ToggleSwitch } from '../../../core/ui/primitives';
+import {
+  MAX_BACKUP_BYTES,
+  exportVaultBackup,
+  parseVaultBackup,
+} from '../../../core/utils/backupService';
 import { exportSubscriptionsCsv } from '../../../core/utils/csvExport';
 import {
   EXCHANGE_RATE_ATTRIBUTION_URL,
@@ -35,14 +43,7 @@ import {
   minorUnitsToInputString,
   parseDecimalToMinorUnits,
 } from '../../../core/utils/moneyFormatter';
-import {
-  CURRENCIES,
-  CURRENCY_CODES,
-  getEffectiveExchangeRates,
-  type CurrencyCode,
-  type Subscription,
-  type VaultSettings,
-} from '../../cashflow/domain/subscription';
+import { detectDeviceLabel } from '../../billing/data/licenseProvider';
 import {
   FREE_MAX_ACTIVE_SUBSCRIPTIONS,
   can,
@@ -52,6 +53,14 @@ import {
   type LicenseEvaluation,
   type LicenseRecord,
 } from '../../billing/domain/entitlements';
+import {
+  CURRENCIES,
+  CURRENCY_CODES,
+  getEffectiveExchangeRates,
+  type CurrencyCode,
+  type Subscription,
+  type VaultSettings,
+} from '../../cashflow/domain/subscription';
 import { CurrencySearchSelect } from '../../cashflow/presentation/CurrencySearchSelect';
 import type { PwaInstallState } from '../../pwa/usePwaInstall';
 
@@ -385,6 +394,15 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
   const handleImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > MAX_BACKUP_BYTES) {
+      setPendingRestore(null);
+      setImportFeedback({
+        type: 'error',
+        message: 'Backup file is too large (max 1 MB). Please choose a valid VaultFlow backup.',
+      });
+      e.target.value = '';
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       const content = typeof reader.result === 'string' ? reader.result : '';
@@ -401,6 +419,13 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
       } else {
         applyBackupRestore(nextSubs, result.data.settings);
       }
+    };
+    reader.onerror = () => {
+      setPendingRestore(null);
+      setImportFeedback({
+        type: 'error',
+        message: 'Could not read that backup file. Please try exporting a fresh JSON backup.',
+      });
     };
     reader.readAsText(file);
     e.target.value = '';
@@ -431,16 +456,16 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
       {/* Header + Appearance Switch */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-[28px] font-extrabold tracking-tight text-text-primary">
+          <h1 className="font-display text-[26px] sm:text-[32px] font-bold tracking-[-0.025em] text-text-primary leading-tight">
             Settings
           </h1>
-          <p className="mt-1 text-[15px] sm:text-sm text-text-secondary">
+          <p className="mt-1 text-[14px] text-text-secondary">
             All data stays on this device. No bank logins.
           </p>
         </div>
 
         <div
-          className="inline-flex items-center p-1 rounded-xl bg-subtle border border-border"
+          className="relative inline-flex items-center p-1 rounded-xl bg-subtle/90 border border-border"
           role="radiogroup"
           aria-label="Theme"
           data-testid="theme-selector"
@@ -454,12 +479,19 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                 role="radio"
                 aria-checked={selected}
                 onClick={() => onChangeThemeMode(id)}
-                className={`min-h-[44px] sm:min-h-[38px] px-3 py-1.5 rounded-lg text-[13px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                className={`relative z-10 min-h-[38px] px-3 py-1.5 rounded-[9px] text-[13px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
                   selected
-                    ? 'bg-card text-text-primary shadow-xs'
+                    ? 'text-text-primary'
                     : 'text-text-secondary hover:text-text-primary'
                 }`}
               >
+                {selected && (
+                  <motion.span
+                    layoutId="settings-theme-pill"
+                    transition={{ type: 'spring', stiffness: 520, damping: 38, mass: 0.7 }}
+                    className="absolute inset-0 -z-10 rounded-[9px] bg-card border border-border/80 shadow-[0_1px_3px_rgba(15,26,23,0.08)]"
+                  />
+                )}
                 <Icon className="w-3.5 h-3.5" aria-hidden={true} />
                 <span>{label}</span>
               </button>
@@ -472,11 +504,13 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
         {/* Left Column: Currency & Rates + Budget & Income */}
         <div className="space-y-6">
           {/* Card 1: Currency and rates */}
-          <section className="rounded-2xl app-surface p-5 space-y-5">
+          <section className="rounded-2xl app-surface p-5 sm:p-6 space-y-5">
             <div className="flex items-start gap-2.5">
               <Globe className="w-4 h-4 text-brand-text mt-1 shrink-0" aria-hidden="true" />
               <div>
-                <h2 className="text-base font-bold text-text-primary">Currency and rates</h2>
+                <h2 className="font-display text-[17px] font-bold tracking-[-0.015em] text-text-primary">
+                  Currency and rates
+                </h2>
                 <p className="mt-0.5 text-[13px] text-text-secondary">
                   Choose your main currency, card foreign-currency markup, and custom offline rates.
                 </p>
@@ -512,15 +546,15 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                   {!canCustomRates && (
                     <span
                       data-testid="card-markup-pro-badge"
-                      className="px-2 py-0.5 rounded-md bg-brand-soft text-brand-text text-xs font-bold"
+                      className="text-xs font-bold text-brand-text"
                     >
-                      Pro
+                      · Pro
                     </span>
                   )}
                 </div>
-                <span className="text-xs text-text-secondary tabular-nums">0% – 10%</span>
+                <span className="text-xs font-mono text-text-secondary tabular-nums">0% – 10%</span>
               </div>
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-3">
                 <input
                   id="card-markup-percent"
                   data-testid="card-markup-input"
@@ -538,9 +572,9 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                     }
                   }}
                   onChange={(e) => handleMarkupChange(e.target.value)}
-                  className="w-28 h-11 px-3 rounded-xl bg-subtle border border-border tabular-nums text-[15px] text-text-primary focus:bg-card focus:border-brand cursor-pointer"
+                  className="w-24 h-11 px-3 rounded-xl bg-subtle/80 border border-border font-mono tabular-nums text-[15px] font-semibold text-text-primary focus:bg-card focus:border-brand cursor-pointer transition-colors"
                 />
-                <p className="text-[13px] text-text-secondary">
+                <p className="text-[13px] text-text-secondary leading-snug">
                   Added to converted totals when a subscription is billed in another currency.
                 </p>
               </div>
@@ -575,42 +609,45 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                       Clear custom ({customRateCount})
                     </button>
                   )}
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={onRefreshRates}
                     disabled={refreshingRates}
                     data-testid="refresh-rates-button"
-                    className="min-h-[36px] px-3 rounded-xl bg-subtle border border-border hover:border-brand text-xs font-semibold text-text-primary inline-flex items-center gap-1.5 disabled:opacity-50 cursor-pointer transition-colors"
                   >
                     <RefreshCw
                       className={`w-3.5 h-3.5 text-brand-text ${refreshingRates ? 'animate-spin' : ''}`}
                       aria-hidden="true"
                     />
                     <span>{refreshingRates ? 'Updating...' : 'Refresh'}</span>
-                  </button>
+                  </Button>
                 </div>
               </div>
 
-              <div className="space-y-2.5">
+              <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/80">
                 {prioritizedRateCurrencies.map((code) => {
                   const hasCustom = typeof customRates[code] === 'number';
-                  const liveRate = settings.exchangeRatesPerUsd[code] ?? CURRENCIES[code].defaultRatePerUsd;
+                  const liveRate =
+                    settings.exchangeRatesPerUsd[code] ?? CURRENCIES[code].defaultRatePerUsd;
                   const displayedValue = hasCustom ? customRates[code]! : liveRate;
 
                   return (
                     <div
                       key={code}
                       data-testid={`rate-row-${code}`}
-                      className="rounded-xl bg-subtle border border-border px-3 py-2.5 space-y-2"
+                      className="bg-subtle/35 px-3.5 py-2.5 space-y-2"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="min-w-0">
-                          <span className="text-[13px] font-bold text-text-primary">{code}</span>
+                          <span className="font-mono text-[13px] font-bold text-text-primary">
+                            {code}
+                          </span>
                           <span className="ml-1.5 text-[13px] text-text-secondary">
                             {CURRENCIES[code].name}
                           </span>
                         </div>
-                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-text-secondary cursor-pointer min-h-[32px]">
+                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-text-secondary cursor-pointer min-h-[30px]">
                           <input
                             type="checkbox"
                             checked={canCustomRates && hasCustom}
@@ -620,15 +657,13 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                           />
                           <span>Use my own rate</span>
                           {!canCustomRates && (
-                            <span className="px-1.5 py-0.5 rounded-md bg-brand-soft text-brand-text text-xs font-bold">
-                              Pro
-                            </span>
+                            <span className="text-brand-text font-bold">· Pro</span>
                           )}
                         </label>
                       </div>
 
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-xs text-text-secondary tabular-nums">
+                        <span className="text-xs font-mono text-text-secondary tabular-nums">
                           {hasCustom
                             ? `Custom (live: ${liveRate})`
                             : `1 USD = ${liveRate} ${code}`}
@@ -645,7 +680,7 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                             key={`${code}-custom-${displayedValue}`}
                             onBlur={(e) => handleCustomRateValueChange(code, e.target.value)}
                             onChange={(e) => handleCustomRateValueChange(code, e.target.value)}
-                            className="w-28 h-10 px-3 rounded-lg bg-card border border-brand tabular-nums text-[14px] font-semibold text-text-primary"
+                            className="w-28 h-9 px-3 rounded-lg bg-card border border-brand font-mono tabular-nums text-[13px] font-semibold text-text-primary"
                           />
                         )}
                       </div>
@@ -689,11 +724,13 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
           </section>
 
           {/* Card 2: Budget and income */}
-          <section className="rounded-2xl app-surface p-5 space-y-5">
+          <section className="rounded-2xl app-surface p-5 sm:p-6 space-y-5">
             <div className="flex items-start gap-2.5">
               <Wallet className="w-4 h-4 text-brand-text mt-1 shrink-0" aria-hidden="true" />
               <div>
-                <h2 className="text-base font-bold text-text-primary">Budget and income</h2>
+                <h2 className="font-display text-[17px] font-bold tracking-[-0.015em] text-text-primary">
+                  Budget and income
+                </h2>
                 <p className="mt-0.5 text-[13px] text-text-secondary">
                   Set your monthly limit and take-home pay.
                 </p>
@@ -719,14 +756,11 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                       setBudgetInput(v);
                     }
                   }}
-                  className="flex-1 h-11 px-3 rounded-xl bg-subtle border border-border tabular-nums text-[15px] text-text-primary focus:bg-card focus:border-brand"
+                  className="flex-1 h-11 px-3.5 rounded-xl bg-subtle/80 border border-border font-mono tabular-nums text-[15px] font-semibold text-text-primary focus:bg-card focus:border-brand transition-colors"
                 />
-                <button
-                  type="submit"
-                  className="min-h-[44px] px-4 rounded-xl bg-brand hover:bg-brand-hover text-[13px] font-semibold text-white cursor-pointer transition-colors"
-                >
+                <Button variant="primary" size="md" type="submit">
                   {budgetSaved ? 'Saved' : 'Save'}
-                </button>
+                </Button>
               </div>
             </form>
 
@@ -749,31 +783,30 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                       setIncomeInput(v);
                     }
                   }}
-                  className="flex-1 h-11 px-3 rounded-xl bg-subtle border border-border tabular-nums text-[15px] text-text-primary focus:bg-card focus:border-brand"
+                  className="flex-1 h-11 px-3.5 rounded-xl bg-subtle/80 border border-border font-mono tabular-nums text-[15px] font-semibold text-text-primary focus:bg-card focus:border-brand transition-colors"
                 />
-                <button
-                  type="submit"
-                  className="min-h-[44px] px-4 rounded-xl bg-brand hover:bg-brand-hover text-[13px] font-semibold text-white cursor-pointer transition-colors"
-                >
+                <Button variant="primary" size="md" type="submit">
                   {incomeSaved ? 'Saved' : 'Save'}
-                </button>
+                </Button>
               </div>
             </form>
           </section>
         </div>
 
-        {/* Right Column: Plan, Reminders, Install app, Data, Danger zone */}
+        {/* Right Column: Plan, Reminders, Install app, Data, Danger zone, Legal */}
         <div className="space-y-6">
           {/* Card 3: Plan & License */}
           <section
-            className="rounded-2xl app-surface p-5 space-y-4"
+            className="rounded-2xl app-surface p-5 sm:p-6 space-y-4"
             data-testid="settings-plan-card"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-start gap-2.5">
                 <CreditCard className="w-4 h-4 text-brand-text mt-1 shrink-0" aria-hidden="true" />
                 <div>
-                  <h2 className="text-base font-bold text-text-primary">Plan</h2>
+                  <h2 className="font-display text-[17px] font-bold tracking-[-0.015em] text-text-primary">
+                    Plan
+                  </h2>
                   <p className="mt-0.5 text-[13px] text-text-secondary tabular-nums">
                     {entitlements.plan === 'pro'
                       ? licenseRecord?.expiresAt
@@ -786,10 +819,8 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
 
               <span
                 data-testid="settings-plan-badge"
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold shrink-0 ${
-                  entitlements.plan === 'pro'
-                    ? 'bg-brand text-white'
-                    : 'bg-subtle border border-border text-text-primary'
+                className={`text-xs font-mono font-bold uppercase tracking-wider shrink-0 mt-1 ${
+                  entitlements.plan === 'pro' ? 'text-brand-text' : 'text-text-secondary'
                 }`}
               >
                 {entitlements.plan === 'pro' ? 'Pro' : 'Free'}
@@ -797,11 +828,11 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
             </div>
 
             {licenseRecord && (
-              <div className="rounded-xl bg-subtle border border-border px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2 text-[13px]">
+              <div className="py-2.5 border-y border-border flex flex-wrap items-center justify-between gap-2 text-[13px]">
                 <span className="text-text-secondary font-medium">License key</span>
                 <span
                   data-testid="settings-masked-license-key"
-                  className="font-semibold text-text-primary tabular-nums"
+                  className="font-mono font-semibold text-text-primary tabular-nums"
                 >
                   {maskLicenseKey(licenseRecord.key)}
                 </span>
@@ -839,36 +870,37 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
 
             <div className="flex flex-wrap items-center gap-2.5">
               {entitlements.plan === 'free' && (
-                <button
-                  type="button"
+                <Button
+                  variant="primary"
+                  size="md"
                   data-testid="settings-upgrade-button"
                   onClick={() => onOpenUpgrade()}
-                  className="min-h-[44px] px-4 py-2 rounded-xl bg-brand hover:bg-brand-hover text-[13px] font-semibold text-white inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Sparkles className="w-4 h-4" aria-hidden="true" />
                   <span>Upgrade to Pro</span>
-                </button>
+                </Button>
               )}
 
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="md"
                 data-testid="settings-restore-license-button"
                 onClick={() => onOpenUpgrade({ showKeyInput: true })}
-                className="min-h-[44px] px-4 py-2 rounded-xl bg-subtle border border-border hover:border-brand text-[13px] font-semibold text-text-primary inline-flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 <KeyRound className="w-4 h-4 text-brand-text" aria-hidden="true" />
                 <span>Restore</span>
-              </button>
+              </Button>
 
               {licenseRecord && !confirmDeactivate && (
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="md"
                   data-testid="settings-deactivate-license-button"
                   onClick={() => setConfirmDeactivate(true)}
-                  className="min-h-[44px] px-4 py-2 rounded-xl bg-subtle border border-border hover:border-red text-[13px] font-semibold text-text-secondary hover:text-red-text transition-colors cursor-pointer"
+                  className="hover:text-red-text"
                 >
                   Deactivate on this device
-                </button>
+                </Button>
               )}
             </div>
 
@@ -882,62 +914,53 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                   Deactivate Pro on this device? Your subscriptions stay saved.
                 </span>
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
+                  <Button
+                    variant="primary"
+                    size="sm"
                     disabled={deactivating}
                     onClick={() => {
                       void handleConfirmDeactivate();
                     }}
-                    className="min-h-[38px] px-3.5 rounded-xl bg-brand hover:bg-brand-hover disabled:opacity-50 text-[13px] font-semibold text-white cursor-pointer"
                   >
                     {deactivating ? 'Deactivating...' : 'Deactivate'}
-                  </button>
-                  <button
-                    type="button"
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => setConfirmDeactivate(false)}
-                    className="min-h-[38px] px-3.5 rounded-xl bg-card border border-border text-[13px] font-semibold text-text-primary cursor-pointer"
                   >
                     Cancel
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
           </section>
 
-          {/* Card 4: Reminders (.ics Calendar Export + Honest In-App/Browser Notifications) */}
-          <section className="rounded-2xl app-surface p-5 space-y-4">
+          {/* Card 4: Reminders */}
+          <section className="rounded-2xl app-surface p-5 sm:p-6 space-y-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-2.5">
                 <Bell className="w-4 h-4 text-brand-text mt-1 shrink-0" aria-hidden="true" />
                 <div>
-                  <h2 className="text-base font-bold text-text-primary">Reminders</h2>
+                  <h2 className="font-display text-[17px] font-bold tracking-[-0.015em] text-text-primary">
+                    Reminders
+                  </h2>
                   <p className="mt-0.5 text-[13px] text-text-secondary">
                     Highlight upcoming renewals and add them to your calendar.
                   </p>
                 </div>
               </div>
 
-              <button
-                type="button"
-                role="switch"
-                aria-checked={settings.notificationsEnabled}
-                aria-label="Toggle renewal reminders"
-                onClick={() =>
+              <ToggleSwitch
+                checked={settings.notificationsEnabled}
+                onCheckedChange={(checked) =>
                   onUpdateSettings({
                     ...settings,
-                    notificationsEnabled: !settings.notificationsEnabled,
+                    notificationsEnabled: checked,
                   })
                 }
-                className={`w-12 h-7 rounded-full p-0.5 transition-colors shrink-0 cursor-pointer ${
-                  settings.notificationsEnabled ? 'bg-brand' : 'bg-border'
-                }`}
-              >
-                <span
-                  className={`block w-6 h-6 rounded-full bg-card shadow-xs transition-transform ${
-                    settings.notificationsEnabled ? 'translate-x-5' : 'translate-x-0'
-                  }`}
-                />
-              </button>
+                ariaLabel="Toggle renewal reminders"
+              />
             </div>
 
             <div>
@@ -959,10 +982,10 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                           ...(settings.calendarExportedAt ? { calendarExportDirty: true } : {}),
                         })
                       }
-                      className={`min-h-[42px] rounded-xl border text-[13px] font-semibold transition-colors cursor-pointer disabled:opacity-45 disabled:text-text-disabled ${
+                      className={`min-h-[40px] rounded-xl border text-[13px] font-semibold transition-colors cursor-pointer disabled:opacity-45 disabled:text-text-disabled ${
                         selected
                           ? 'bg-brand-soft border-brand text-brand-text'
-                          : 'bg-subtle border-border text-text-secondary hover:text-text-primary'
+                          : 'bg-subtle/70 border-border text-text-secondary hover:text-text-primary'
                       }`}
                     >
                       {days} {days === 1 ? 'day before' : 'days before'}
@@ -973,13 +996,14 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
             </div>
 
             {/* Calendar (.ics) export */}
-            <div className="pt-3 border-t border-border space-y-3">
-              <button
-                type="button"
+            <div className="pt-3.5 border-t border-border space-y-3">
+              <Button
+                variant="primary"
+                size="md"
                 disabled={activeSubscriptionCount === 0}
                 onClick={handleCalendarExportClick}
                 data-testid="export-all-calendar-ics"
-                className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-brand hover:bg-brand-hover disabled:opacity-45 text-[14px] font-semibold text-white flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                className="w-full"
               >
                 {downloadedIcs ? (
                   <>
@@ -992,9 +1016,9 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                     <span>Add all renewals to my calendar</span>
                   </>
                 )}
-              </button>
+              </Button>
 
-              <div className="rounded-xl bg-subtle border border-border p-3.5 space-y-1.5 text-[13px] text-text-secondary">
+              <div className="rounded-xl bg-subtle/60 border border-border p-3.5 space-y-1.5 text-[13px] text-text-secondary leading-relaxed">
                 <p>
                   <strong className="text-text-primary">Google Calendar:</strong> Create a calendar
                   called &ldquo;Subscriptions&rdquo;, set its default all-day notification, then go
@@ -1012,34 +1036,32 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
             </div>
 
             {/* Honest browser notification notice */}
-            <div className="pt-3 border-t border-border space-y-2.5">
+            <div className="pt-3.5 border-t border-border space-y-2.5">
               <p className="text-[13px] text-text-secondary leading-relaxed">
                 Browser notifications only appear while the app is open. For reminders you
                 can&apos;t miss, add renewals to your calendar.
               </p>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={handleRequestBrowserPermission}
-                  className="min-h-[42px] px-3.5 py-2 rounded-xl bg-subtle border border-border hover:border-brand text-[13px] font-semibold text-text-primary cursor-pointer transition-colors"
-                >
+                <Button variant="secondary" size="sm" onClick={handleRequestBrowserPermission}>
                   Allow browser notifications
-                </button>
+                </Button>
                 {notifStatus && <p className="text-[13px] text-text-secondary">{notifStatus}</p>}
               </div>
             </div>
           </section>
 
-          {/* Card 4: Install app (only shown when installable, iOS Safari, or already installed) */}
+          {/* Card 5: Install app */}
           {showInstallCard && (
             <section
-              className="rounded-2xl app-surface p-5 space-y-3"
+              className="rounded-2xl app-surface p-5 sm:p-6 space-y-3"
               data-testid="install-app-section"
             >
               <div className="flex items-start gap-2.5">
                 <Smartphone className="w-4 h-4 text-brand-text mt-1 shrink-0" aria-hidden="true" />
                 <div>
-                  <h2 className="text-base font-bold text-text-primary">Install app</h2>
+                  <h2 className="font-display text-[17px] font-bold tracking-[-0.015em] text-text-primary">
+                    Install app
+                  </h2>
                   <p className="mt-0.5 text-[13px] text-text-secondary">
                     {pwaInstall.isInstalled
                       ? 'VaultFlow is installed on this device and works offline.'
@@ -1051,33 +1073,36 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
               </div>
 
               {pwaInstall.canInstall && (
-                <button
-                  type="button"
+                <Button
+                  variant="primary"
+                  size="md"
                   onClick={() => {
                     void pwaInstall.promptInstall();
                   }}
                   data-testid="install-app-button"
-                  className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-brand hover:bg-brand-hover text-[14px] font-semibold text-white flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  className="w-full"
                 >
                   <Download className="w-4 h-4 shrink-0" aria-hidden="true" />
                   <span>Install app</span>
-                </button>
+                </Button>
               )}
 
               {!pwaInstall.canInstall && pwaInstall.isIosSafari && !pwaInstall.isInstalled && (
-                <p className="rounded-xl bg-subtle border border-border px-3.5 py-2.5 text-[13px] font-medium text-text-primary">
+                <p className="rounded-xl bg-subtle/70 border border-border px-3.5 py-2.5 text-[13px] font-medium text-text-primary">
                   In Safari, tap <strong>Share &gt; Add to Home Screen</strong>.
                 </p>
               )}
             </section>
           )}
 
-          {/* Card 5: Data (Export backup .json, Import backup, Export CSV) */}
-          <section className="rounded-2xl app-surface p-5 space-y-4">
+          {/* Card 6: Data */}
+          <section className="rounded-2xl app-surface p-5 sm:p-6 space-y-4">
             <div className="flex items-start gap-2.5">
               <Database className="w-4 h-4 text-brand-text mt-1 shrink-0" aria-hidden="true" />
               <div>
-                <h2 className="text-base font-bold text-text-primary">Data</h2>
+                <h2 className="font-display text-[17px] font-bold tracking-[-0.015em] text-text-primary">
+                  Data
+                </h2>
                 <p className="mt-0.5 text-[13px] text-text-secondary tabular-nums">
                   Back up, restore, or open in Excel ({subscriptions.length} saved).
                 </p>
@@ -1085,11 +1110,12 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              <button
-                type="button"
+              <Button
+                variant="primary"
+                size="md"
                 data-testid="export-backup-json"
                 onClick={handleExportBackup}
-                className="min-h-[44px] px-3.5 py-2.5 rounded-xl bg-brand hover:bg-brand-hover text-[13px] font-semibold text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                className="text-[13px] px-3"
               >
                 {downloadedBackup ? (
                   <>
@@ -1099,20 +1125,21 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                 ) : (
                   <>
                     <Download className="w-4 h-4 shrink-0" aria-hidden="true" />
-                    <span>Export backup (.json)</span>
+                    <span>Export (.json)</span>
                   </>
                 )}
-              </button>
+              </Button>
 
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="md"
                 data-testid="import-backup-trigger"
                 onClick={() => fileInputRef.current?.click()}
-                className="min-h-[44px] px-3.5 py-2.5 rounded-xl bg-subtle border border-border hover:border-brand text-[13px] font-semibold text-text-primary flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                className="text-[13px] px-3"
               >
                 <Upload className="w-4 h-4 text-text-secondary shrink-0" aria-hidden="true" />
                 <span>Import backup</span>
-              </button>
+              </Button>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1123,11 +1150,12 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                 className="sr-only"
               />
 
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="md"
                 data-testid="export-csv-button"
                 onClick={handleExportCsv}
-                className="min-h-[44px] px-3.5 py-2.5 rounded-xl bg-subtle border border-border hover:border-brand text-[13px] font-semibold text-text-primary flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                className="text-[13px] px-3"
               >
                 {downloadedCsv ? (
                   <>
@@ -1144,14 +1172,14 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                     {!canExportCsv && (
                       <span
                         data-testid="export-csv-pro-badge"
-                        className="px-1.5 py-0.5 rounded-md bg-brand-soft text-brand-text text-xs font-bold"
+                        className="text-xs font-bold text-brand-text"
                       >
-                        Pro
+                        · Pro
                       </span>
                     )}
                   </>
                 )}
-              </button>
+              </Button>
             </div>
 
             {importFeedback && (
@@ -1176,33 +1204,31 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                   {subscriptions.length === 1 ? 'subscription' : 'subscriptions'}.
                 </span>
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
+                  <Button
+                    variant="primary"
+                    size="sm"
                     onClick={() =>
                       applyBackupRestore(pendingRestore.subscriptions, pendingRestore.settings)
                     }
-                    className="min-h-[38px] px-3.5 rounded-xl bg-brand hover:bg-brand-hover text-[13px] font-semibold text-white cursor-pointer"
                   >
                     Replace
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPendingRestore(null)}
-                    className="min-h-[38px] px-3.5 rounded-xl bg-card border border-border text-[13px] font-semibold text-text-primary cursor-pointer"
-                  >
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={() => setPendingRestore(null)}>
                     Cancel
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
           </section>
 
-          {/* Card 6: Danger zone */}
-          <section className="rounded-2xl app-surface p-5 space-y-4">
+          {/* Card 7: Danger zone */}
+          <section className="rounded-2xl app-surface p-5 sm:p-6 space-y-4">
             <div className="flex items-start gap-2.5">
               <AlertTriangle className="w-4 h-4 text-red mt-1 shrink-0" aria-hidden="true" />
               <div>
-                <h2 className="text-base font-bold text-text-primary">Danger zone</h2>
+                <h2 className="font-display text-[17px] font-bold tracking-[-0.015em] text-text-primary">
+                  Danger zone
+                </h2>
                 <p className="mt-0.5 text-[13px] text-text-secondary">
                   Reset with sample data or wipe everything on this device.
                 </p>
@@ -1211,8 +1237,9 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
 
             <div className="flex flex-wrap items-center gap-3">
               {!confirmDemoSeed ? (
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
+                  size="md"
                   onClick={() => {
                     if (subscriptions.length > 0) {
                       setConfirmDemoSeed(true);
@@ -1220,11 +1247,10 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                       onSeedDemoData();
                     }
                   }}
-                  className="min-h-[44px] px-4 py-2 rounded-xl bg-subtle border border-border hover:border-brand text-[13px] font-semibold text-text-primary flex items-center gap-2 cursor-pointer transition-colors"
                 >
                   <RotateCcw className="w-4 h-4 text-text-secondary" aria-hidden="true" />
                   <span>Load sample data</span>
-                </button>
+                </Button>
               ) : (
                 <div
                   role="alert"
@@ -1236,36 +1262,32 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                     {subscriptions.length === 1 ? 'subscription' : 'subscriptions'}.
                   </span>
                   <div className="flex items-center gap-2">
-                    <button
-                      type="button"
+                    <Button
+                      variant="primary"
+                      size="sm"
                       onClick={() => {
                         onSeedDemoData();
                         setConfirmDemoSeed(false);
                       }}
-                      className="min-h-[38px] px-3.5 rounded-xl bg-brand hover:bg-brand-hover text-[13px] font-semibold text-white cursor-pointer"
                     >
                       Replace
-                    </button>
-                    <button
-                      type="button"
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       onClick={() => setConfirmDemoSeed(false)}
-                      className="min-h-[38px] px-3.5 rounded-xl bg-card border border-border text-[13px] font-semibold text-text-primary cursor-pointer"
                     >
                       Cancel
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
 
               {!confirmClear ? (
-                <button
-                  type="button"
-                  onClick={() => setConfirmClear(true)}
-                  className="min-h-[44px] px-4 py-2 rounded-xl bg-red-soft border border-red-border hover:border-red text-[13px] font-semibold text-red-text flex items-center gap-2 cursor-pointer transition-colors"
-                >
+                <Button variant="dangerSoft" size="md" onClick={() => setConfirmClear(true)}>
                   <Trash2 className="w-4 h-4" aria-hidden="true" />
                   <span>Clear all data</span>
-                </button>
+                </Button>
               ) : (
                 <div
                   role="alert"
@@ -1275,26 +1297,89 @@ export const VaultSettingsView: React.FC<VaultSettingsViewProps> = ({
                     Remove all saved subscriptions?
                   </span>
                   <div className="flex items-center gap-2">
-                    <button
-                      type="button"
+                    <Button
+                      variant="danger"
+                      size="sm"
                       onClick={() => {
                         onClearAllData();
                         setConfirmClear(false);
                       }}
-                      className="min-h-[38px] px-3.5 rounded-xl bg-red hover:bg-red-hover text-[13px] font-semibold text-white cursor-pointer"
                     >
                       Clear all
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmClear(false)}
-                      className="min-h-[38px] px-3.5 rounded-xl bg-card border border-border text-[13px] font-semibold text-text-primary cursor-pointer"
-                    >
+                    </Button>
+                    <Button variant="secondary" size="sm" onClick={() => setConfirmClear(false)}>
                       Cancel
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
+            </div>
+          </section>
+
+          {/* Card 8: Legal & Feedback */}
+          <section
+            className="rounded-2xl app-surface p-5 sm:p-6 space-y-4"
+            data-testid="settings-legal-feedback"
+          >
+            <div className="flex items-start gap-2.5">
+              <ShieldCheck className="w-4 h-4 text-brand-text mt-1 shrink-0" aria-hidden="true" />
+              <div>
+                <h2 className="font-display text-[17px] font-bold tracking-[-0.015em] text-text-primary">
+                  Legal &amp; feedback
+                </h2>
+                <p className="mt-0.5 text-[13px] text-text-secondary">
+                  Read how your data is handled or report an issue.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[14px]">
+              <a
+                href="/privacy/"
+                className="min-h-[40px] inline-flex items-center font-semibold text-brand-text hover:underline"
+              >
+                Privacy
+              </a>
+              <a
+                href="/terms/"
+                className="min-h-[40px] inline-flex items-center font-semibold text-brand-text hover:underline"
+              >
+                Terms
+              </a>
+              <a
+                href="/refunds/"
+                className="min-h-[40px] inline-flex items-center font-semibold text-brand-text hover:underline"
+              >
+                Refunds
+              </a>
+              <a
+                href="/"
+                className="min-h-[40px] inline-flex items-center font-medium text-text-secondary hover:text-text-primary"
+              >
+                Website
+              </a>
+            </div>
+
+            <div className="pt-3 border-t border-border flex flex-wrap items-center justify-between gap-3">
+              <span className="text-xs font-mono text-text-secondary tabular-nums">
+                VaultFlow v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.0.0'}
+              </span>
+              <a
+                href={`mailto:[CONTACT EMAIL]?subject=${encodeURIComponent(
+                  'VaultFlow feedback',
+                )}&body=${encodeURIComponent(
+                  `\n\n---\nApp version: ${
+                    typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.0.0'
+                  }\nBrowser: ${detectDeviceLabel()}\nUser agent: ${
+                    typeof navigator !== 'undefined' ? navigator.userAgent : 'Unknown'
+                  }`,
+                )}`}
+                data-testid="settings-send-feedback"
+                className="min-h-[42px] px-4 py-2 rounded-xl bg-card border border-border hover:border-border-strong hover:bg-subtle/60 text-[13px] font-semibold text-text-primary inline-flex items-center gap-2 transition-colors"
+              >
+                <Mail className="w-4 h-4 text-brand-text" aria-hidden="true" />
+                <span>Send feedback</span>
+              </a>
             </div>
           </section>
         </div>

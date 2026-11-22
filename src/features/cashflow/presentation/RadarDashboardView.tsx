@@ -1,15 +1,17 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  ArrowRight,
+  ArrowUpRight,
   Bell,
   ChevronDown,
   ChevronRight,
+  Plus,
   RotateCcw,
   Search,
   X,
 } from 'lucide-react';
 import { getCategoryVisual } from '../../../core/theme/categoryIcons';
+import { Button, MoneyFigure, SegmentedControl } from '../../../core/ui/primitives';
 import { formatShortDate } from '../../../core/utils/dateMath';
 import { formatMinorUnits } from '../../../core/utils/moneyFormatter';
 import type { LeakAuditReport } from '../../audit/domain/auditEngine';
@@ -98,9 +100,19 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
   const showDecimals = !ZERO_DECIMAL_DISPLAY_CURRENCIES.has(baseCurrency);
   const flaggedCount = audit.uniqueFlaggedCount;
 
+  const filteredVisibleItems = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    if (!normalizedQuery) return summary.visibleItems;
+    return summary.visibleItems.filter(
+      (item) =>
+        item.subscription.name.toLowerCase().includes(normalizedQuery) ||
+        item.subscription.notes.toLowerCase().includes(normalizedQuery),
+    );
+  }, [summary.visibleItems, searchQuery]);
+
   const dueGroups = useMemo(
-    () => groupSubscriptionsByDueWindow(summary.visibleItems, todayIso),
-    [summary.visibleItems, todayIso],
+    () => groupSubscriptionsByDueWindow(filteredVisibleItems, todayIso),
+    [filteredVisibleItems, todayIso],
   );
 
   const selectedItem = useMemo(
@@ -111,12 +123,20 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
     [selectedSubId, summary.activeItems],
   );
 
-  const handleOpenDetail = (id: string) => {
+  const handleRegisterRowRef = useCallback((id: string, el: HTMLButtonElement | null) => {
+    if (el) {
+      rowRefs.current.set(id, el);
+    } else {
+      rowRefs.current.delete(id);
+    }
+  }, []);
+
+  const handleOpenDetail = useCallback((id: string) => {
     lastOpenedIdRef.current = id;
     setSelectedSubId(id);
-  };
+  }, []);
 
-  const handleCloseDetail = () => {
+  const handleCloseDetail = useCallback(() => {
     const returnId = lastOpenedIdRef.current;
     setSelectedSubId(null);
     if (returnId) {
@@ -124,7 +144,22 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
         rowRefs.current.get(returnId)?.focus();
       });
     }
-  };
+  }, []);
+
+  const formatted14Days = formatMinorUnits(audit.next14DaysDueMinorUnits, baseCurrency, {
+    showDecimals,
+  });
+  const formattedMonthlyAvg = formatMinorUnits(summary.activeMonthlyBaseMinorUnits, baseCurrency, {
+    showDecimals,
+  });
+  const formattedAnnual = formatMinorUnits(summary.activeAnnualBaseMinorUnits, baseCurrency, {
+    showDecimals: false,
+  });
+  const formattedReclaimable = formatMinorUnits(
+    audit.totalReclaimableAnnualMinorUnits,
+    baseCurrency,
+    { showDecimals: false },
+  );
 
   return (
     <div className="space-y-6">
@@ -147,20 +182,20 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2 shrink-0">
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => onExpiredTrialCancelled(trial.id)}
-                  className="min-h-[44px] sm:min-h-[38px] px-3.5 py-2 rounded-xl bg-card border border-amber-border hover:border-brand text-[13px] font-semibold text-text-primary transition-colors cursor-pointer"
                 >
                   Yes, cancelled
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
                   onClick={() => onExpiredTrialPaid(trial.id)}
-                  className="min-h-[44px] sm:min-h-[38px] px-3.5 py-2 rounded-xl bg-brand hover:bg-brand-hover text-[13px] font-semibold text-white transition-colors cursor-pointer"
                 >
                   No, it&apos;s now paid
-                </button>
+                </Button>
               </div>
             </div>
           ))}
@@ -179,7 +214,7 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
               <Bell className="w-4 h-4 text-amber shrink-0" aria-hidden="true" />
               <h2 className="text-[14px] font-bold text-text-primary">Coming up</h2>
             </div>
-            <span className="text-xs font-semibold text-amber-text tabular-nums">
+            <span className="font-mono text-xs font-semibold text-amber-text tabular-nums">
               {comingUpReminders.length}{' '}
               {comingUpReminders.length === 1 ? 'renewal' : 'renewals'}
             </span>
@@ -191,12 +226,18 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
                 type="button"
                 data-testid={`coming-up-item-${reminder.subscription.id}`}
                 onClick={() => handleOpenDetail(reminder.subscription.id)}
-                className="min-h-[40px] px-3 py-1.5 rounded-xl bg-card border border-amber-border hover:border-brand text-left flex items-center gap-2 transition-colors cursor-pointer"
+                className="min-h-[40px] max-w-full px-3 py-1.5 rounded-xl bg-card border border-amber-border hover:border-brand text-left flex items-center gap-2 transition-colors cursor-pointer"
               >
-                <span className="text-[13px] font-semibold text-text-primary">
+                <span
+                  title={reminder.title}
+                  className="text-[13px] font-semibold text-text-primary truncate min-w-0"
+                >
                   {reminder.title}
                 </span>
-                <span className="text-[13px] font-bold text-amber-text tabular-nums">
+                <span
+                  title={reminder.formattedAmount}
+                  className="font-mono text-[13px] font-bold text-amber-text tabular-nums shrink-0"
+                >
                   {reminder.formattedAmount}
                 </span>
               </button>
@@ -205,88 +246,67 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
         </section>
       )}
 
-      {/* Workspace Header & Period Toggle */}
+      {/* Executive Workspace Header & Spring Period Toggle */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-[28px] font-extrabold tracking-tight text-text-primary">
+          <h1 className="font-display text-[26px] sm:text-[32px] leading-[1.15] font-bold tracking-[-0.03em] text-text-primary">
             Your subscriptions
           </h1>
-          <p className="mt-1 text-[15px] sm:text-sm text-text-secondary">
-            See what renews next and what you can cancel.
+          <p className="mt-1 text-[14px] text-text-secondary">
+            Track upcoming renewals, spot price hikes, and simulate cuts in real time.
           </p>
         </div>
 
-        <div
-          className="inline-flex items-center p-1 rounded-xl bg-subtle border border-border"
-          role="group"
-          aria-label="Billing period display"
-        >
-          <button
-            type="button"
-            aria-pressed={!showAnnual}
-            onClick={() => onToggleAnnual(false)}
-            className={`min-h-[36px] px-3.5 py-1.5 rounded-lg text-[13px] font-semibold transition-colors whitespace-nowrap cursor-pointer ${
-              !showAnnual
-                ? 'bg-card text-text-primary shadow-xs'
-                : 'text-text-secondary hover:text-text-primary'
-            }`}
-          >
-            Monthly
-          </button>
-          <button
-            type="button"
-            aria-pressed={showAnnual}
-            onClick={() => onToggleAnnual(true)}
-            className={`min-h-[36px] px-3.5 py-1.5 rounded-lg text-[13px] font-semibold transition-colors whitespace-nowrap cursor-pointer ${
-              showAnnual
-                ? 'bg-card text-text-primary shadow-xs'
-                : 'text-text-secondary hover:text-text-primary'
-            }`}
-          >
-            Yearly
-          </button>
-        </div>
+        <SegmentedControl
+          value={showAnnual ? 'annual' : 'monthly'}
+          onChange={(val) => onToggleAnnual(val === 'annual')}
+          ariaLabel="Billing period display"
+          layoutId="home-period-toggle"
+          options={[
+            { value: 'monthly', label: 'Monthly' },
+            { value: 'annual', label: 'Yearly' },
+          ]}
+        />
       </div>
 
-      {/* Live 4-KPI Strip (2x2 at 360px, 4-col on desktop) */}
+      {/* Unified Mercury-Style 4-Metric Hairline Strip */}
       <section
         aria-label="Key spending metrics"
-        className="grid grid-cols-2 lg:grid-cols-4 gap-3.5"
+        className="rounded-2xl app-surface overflow-hidden grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 divide-x-0 sm:divide-x divide-border"
       >
-        <div className="rounded-2xl app-surface p-4">
-          <p className="text-[13px] font-medium text-text-secondary">Due in the next 14 days</p>
-          <p
-            className="mt-1.5 tabular-nums text-xl sm:text-2xl font-bold text-text-primary"
+        <div className="p-4 sm:p-5 min-w-0 border-r border-border lg:border-r-0">
+          <p className="text-[12px] font-semibold text-text-secondary">Due in 14 days</p>
+          <MoneyFigure
+            value={formatted14Days}
             data-testid="kpi-14day-buffer"
-          >
-            {formatMinorUnits(audit.next14DaysDueMinorUnits, baseCurrency, { showDecimals })}
-          </p>
-          <p className="mt-1 text-[13px] text-text-secondary tabular-nums">
-            {audit.next14DaysCount} {audit.next14DaysCount === 1 ? 'payment' : 'payments'}
-          </p>
-        </div>
-
-        <div className="rounded-2xl app-surface p-4">
-          <p className="text-[13px] font-medium text-text-secondary">Monthly average</p>
-          <p className="mt-1.5 tabular-nums text-xl sm:text-2xl font-bold text-text-primary">
-            {formatMinorUnits(summary.activeMonthlyBaseMinorUnits, baseCurrency, { showDecimals })}
-          </p>
-          <p className="mt-1 text-[13px] text-text-secondary">
-            Yearly and quarterly bills spread per month
+            className="mt-2 block text-[19px] sm:text-[24px] font-bold text-text-primary truncate"
+          />
+          <p className="mt-1.5 text-[12px] text-text-secondary tabular-nums">
+            {audit.next14DaysCount} {audit.next14DaysCount === 1 ? 'upcoming bill' : 'upcoming bills'}
           </p>
         </div>
 
-        <div className="rounded-2xl app-surface p-4">
-          <p className="text-[13px] font-medium text-text-secondary">Per year</p>
-          <p className="mt-1.5 tabular-nums text-xl sm:text-2xl font-bold text-text-primary">
-            {formatMinorUnits(summary.activeAnnualBaseMinorUnits, baseCurrency, {
-              showDecimals: false,
-            })}
+        <div className="p-4 sm:p-5 min-w-0">
+          <p className="text-[12px] font-semibold text-text-secondary">Monthly average</p>
+          <MoneyFigure
+            value={formattedMonthlyAvg}
+            className="mt-2 block text-[19px] sm:text-[24px] font-bold text-text-primary truncate"
+          />
+          <p className="mt-1.5 text-[12px] text-text-secondary truncate">
+            All cycles normalized
           </p>
-          <p className="mt-1 text-[13px] text-text-secondary">
+        </div>
+
+        <div className="p-4 sm:p-5 min-w-0 border-r border-border lg:border-r-0">
+          <p className="text-[12px] font-semibold text-text-secondary">Annual projection</p>
+          <MoneyFigure
+            value={formattedAnnual}
+            className="mt-2 block text-[19px] sm:text-[24px] font-bold text-text-primary truncate"
+          />
+          <p className="mt-1.5 text-[12px] text-text-secondary tabular-nums">
             {summary.activeTrialCount > 0
               ? `${summary.activeTrialCount} free ${summary.activeTrialCount === 1 ? 'trial' : 'trials'} active`
-              : `${summary.activeItems.length} active total`}
+              : `${summary.activeItems.length} active ${summary.activeItems.length === 1 ? 'plan' : 'plans'}`}
           </p>
         </div>
 
@@ -294,25 +314,26 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
           type="button"
           onClick={onOpenAuditTab}
           data-testid="kpi-savings-found"
-          className="text-left rounded-2xl bg-brand-soft hover:brightness-[0.98] border border-brand-border p-4 transition-colors cursor-pointer group"
+          className="text-left p-4 sm:p-5 min-w-0 bg-brand-soft/65 hover:bg-brand-soft transition-colors cursor-pointer group"
         >
           <div className="flex items-center justify-between gap-2">
-            <p className="text-[13px] font-semibold text-brand-text">Savings found</p>
-            <ArrowRight
-              className="w-4 h-4 text-brand-text transition-transform group-hover:translate-x-0.5 shrink-0"
+            <p className="text-[12px] font-semibold text-brand-text">Savings found</p>
+            <ArrowUpRight
+              className="w-4 h-4 text-brand-text transition-transform duration-150 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 shrink-0"
               aria-hidden="true"
             />
           </div>
-          <p className="mt-1.5 tabular-nums text-xl sm:text-2xl font-bold text-brand-text">
-            {formatMinorUnits(audit.totalReclaimableAnnualMinorUnits, baseCurrency, {
-              showDecimals: false,
-            })}
-            <span className="text-[13px] font-semibold">/yr</span>
-          </p>
-          <p className="mt-1 text-[13px] text-text-secondary">
+          <MoneyFigure
+            value={formattedReclaimable}
+            suffix="/yr"
+            title={`${formattedReclaimable}/yr`}
+            className="mt-2 block text-[19px] sm:text-[24px] font-bold text-brand-text truncate"
+            suffixClassName="text-brand-text/80"
+          />
+          <p className="mt-1.5 text-[12px] text-text-secondary truncate">
             {flaggedCount > 0
-              ? `${flaggedCount} ${flaggedCount === 1 ? 'item' : 'items'} in Insights`
-              : 'All subscriptions look good'}
+              ? `${flaggedCount} ${flaggedCount === 1 ? 'opportunity' : 'opportunities'} in Insights`
+              : 'No leaks flagged'}
           </p>
         </button>
       </section>
@@ -326,11 +347,26 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
         onCommitArchive={onCommitSimulations}
       />
 
-      {/* Primary 2-Column Workspace */}
+      {/* Primary 2-Column Executive Workspace */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column (5/12): Sticky Spending Chart + Monthly Budget */}
+        {/* Left Column (5/12): Sticky Burn Ring + Category Ledger + Budget Runway */}
         <div className="lg:col-span-5 lg:sticky lg:top-20 space-y-5">
-          <div className="rounded-2xl app-surface p-6">
+          <div className="rounded-2xl app-surface p-5 sm:p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-display text-[16px] font-bold tracking-tight text-text-primary">
+                Spend breakdown
+              </h2>
+              {selectedCategory && (
+                <button
+                  type="button"
+                  onClick={() => onSelectCategory(null)}
+                  className="text-xs font-semibold text-brand-text hover:underline cursor-pointer"
+                >
+                  Clear filter
+                </button>
+              )}
+            </div>
+
             <InteractiveBurnDial
               segments={summary.dialSegments}
               selectedCategory={selectedCategory}
@@ -342,17 +378,17 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
               onAddFirst={onAddClick}
             />
 
-            <div className="mt-6 pt-5 border-t border-border grid grid-cols-3 gap-3 text-center">
+            <div className="mt-5 pt-4 border-t border-border/80 grid grid-cols-3 gap-2 text-center">
               <div>
-                <p className="text-[13px] text-text-secondary">Active</p>
-                <p className="mt-1 tabular-nums text-base font-bold text-text-primary">
+                <p className="text-xs font-medium text-text-secondary">Active</p>
+                <p className="mt-1 font-mono tabular-nums text-[15px] font-bold text-text-primary">
                   {summary.activeItems.length - summary.simulatedCount}
                 </p>
               </div>
-              <div className="border-x border-border">
-                <p className="text-[13px] text-text-secondary">Due &le; 3d</p>
+              <div className="border-x border-border/80">
+                <p className="text-xs font-medium text-text-secondary">Due &le; 3d</p>
                 <p
-                  className={`mt-1 tabular-nums text-base font-bold ${
+                  className={`mt-1 font-mono tabular-nums text-[15px] font-bold ${
                     summary.dueSoonCount > 0 ? 'text-amber-text' : 'text-text-primary'
                   }`}
                 >
@@ -360,9 +396,9 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
                 </p>
               </div>
               <div>
-                <p className="text-[13px] text-text-secondary">Price hikes</p>
+                <p className="text-xs font-medium text-text-secondary">Price hikes</p>
                 <p
-                  className={`mt-1 tabular-nums text-base font-bold ${
+                  className={`mt-1 font-mono tabular-nums text-[15px] font-bold ${
                     audit.priceHikes.length > 0 ? 'text-amber-text' : 'text-text-primary'
                   }`}
                 >
@@ -382,20 +418,21 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
           />
         </div>
 
-        {/* Right Column (7/12): Search + Grouped Subscription Rows */}
+        {/* Right Column (7/12): Search + Grouped Subscription Ledger */}
         <div className="lg:col-span-7 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <h2 className="text-base font-bold text-text-primary">
-                {selectedVisual
-                  ? `${selectedVisual.label} (${summary.visibleItems.length})`
-                  : `Upcoming renewals (${summary.visibleItems.length})`}
+            <div className="flex items-center gap-2.5 min-w-0">
+              <h2 className="font-display text-[17px] font-bold tracking-tight text-text-primary truncate">
+                {selectedVisual ? selectedVisual.label : 'Upcoming renewals'}
               </h2>
+              <span className="font-mono text-xs font-semibold text-text-secondary tabular-nums">
+                {filteredVisibleItems.length}
+              </span>
               {selectedCategory && (
                 <button
                   type="button"
                   onClick={() => onSelectCategory(null)}
-                  className="text-[13px] font-semibold text-brand-text hover:underline transition-colors cursor-pointer"
+                  className="text-[13px] font-semibold text-brand-text hover:underline transition-colors cursor-pointer whitespace-nowrap"
                 >
                   Show all
                 </button>
@@ -404,7 +441,7 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
 
             <div className="relative w-full sm:w-64">
               <Search
-                className="w-4 h-4 text-text-secondary absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                className="w-4 h-4 text-text-secondary absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
                 aria-hidden="true"
               />
               <input
@@ -413,7 +450,7 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
                 onChange={(e) => onSearchChange(e.target.value)}
                 placeholder="Search subscriptions..."
                 aria-label="Search subscriptions"
-                className="w-full h-11 pl-9 pr-10 rounded-xl bg-card border border-border text-[15px] sm:text-sm text-text-primary placeholder:text-text-secondary focus:border-brand"
+                className="w-full h-11 pl-10 pr-10 rounded-xl bg-card border border-border hover:border-border-strong text-[15px] sm:text-sm text-text-primary placeholder:text-text-secondary focus:border-brand shadow-[0_1px_2px_rgba(15,26,23,0.03)] transition-colors"
               />
               {searchQuery && (
                 <button
@@ -428,38 +465,38 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
             </div>
           </div>
 
-          {summary.visibleItems.length === 0 ? (
-            <div className="rounded-2xl app-surface p-8 text-center">
-              <p className="text-[15px] font-bold text-text-primary">
+          {filteredVisibleItems.length === 0 ? (
+            <div
+              data-testid="empty-subscriptions-state"
+              className="rounded-2xl app-surface p-8 sm:p-10 text-center"
+            >
+              <p className="font-display text-[18px] font-bold text-text-primary">
                 {searchQuery || selectedCategory
                   ? 'No matching subscriptions'
-                  : 'No subscriptions added yet'}
+                  : 'Your subscription ledger is clear'}
               </p>
-              <p className="mt-1 text-[13px] text-text-secondary">
+              <p className="mt-1.5 text-[14px] text-text-secondary max-w-sm mx-auto">
                 {searchQuery || selectedCategory
-                  ? 'Try clearing your filter or search.'
-                  : 'Add one manually or import a bank statement in Insights.'}
+                  ? 'Try clearing your category filter or search query.'
+                  : 'Add your first subscription manually or paste a bank statement in Insights.'}
               </p>
-              <div className="mt-4 flex items-center justify-center gap-2.5">
+              <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
                 {(searchQuery || selectedCategory) && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
+                    size="md"
                     onClick={() => {
                       onSearchChange('');
                       onSelectCategory(null);
                     }}
-                    className="min-h-[44px] px-4 py-2 rounded-xl bg-subtle border border-border text-[13px] font-semibold text-text-primary cursor-pointer"
                   >
                     Clear filters
-                  </button>
+                  </Button>
                 )}
-                <button
-                  type="button"
-                  onClick={onAddClick}
-                  className="min-h-[44px] px-4 py-2 rounded-xl bg-brand hover:bg-brand-hover text-[13px] font-semibold text-white cursor-pointer"
-                >
-                  Add subscription
-                </button>
+                <Button variant="primary" size="md" onClick={onAddClick}>
+                  <Plus className="w-4 h-4" aria-hidden="true" />
+                  <span>Add subscription</span>
+                </Button>
               </div>
             </div>
           ) : (
@@ -470,27 +507,21 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
                     <h3 className="text-[13px] font-semibold text-text-secondary">
                       {group.label}
                     </h3>
-                    <span className="text-[13px] text-text-secondary tabular-nums">
+                    <span className="font-mono text-xs font-medium text-text-secondary tabular-nums">
                       {group.items.length}
                     </span>
                   </div>
-                  <div className="rounded-2xl app-surface divide-y divide-border overflow-hidden">
+                  <div className="rounded-2xl app-surface divide-y divide-border/80 overflow-hidden">
                     {group.items.map((item) => (
                       <SubscriptionRow
                         key={item.subscription.id}
-                        ref={(el) => {
-                          if (el) {
-                            rowRefs.current.set(item.subscription.id, el);
-                          } else {
-                            rowRefs.current.delete(item.subscription.id);
-                          }
-                        }}
                         item={item}
                         settings={settings}
                         showAnnual={showAnnual}
                         isReadOnly={readOnlyIds.has(item.subscription.id)}
                         onSelect={handleOpenDetail}
                         onToggleSimulate={onToggleSimulate}
+                        onRegisterRowRef={handleRegisterRowRef}
                       />
                     ))}
                   </div>
@@ -517,17 +548,20 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
               </button>
 
               {showArchived && (
-                <div className="mt-2 rounded-2xl app-surface divide-y divide-border overflow-hidden">
+                <div className="mt-2 rounded-2xl app-surface divide-y divide-border/80 overflow-hidden">
                   {summary.archivedItems.map((item) => (
                     <div
                       key={item.subscription.id}
-                      className="px-4 py-3 flex items-center justify-between gap-3"
+                      className="px-4 py-3.5 flex items-center justify-between gap-3"
                     >
-                      <div className="min-w-0">
-                        <p className="text-[15px] font-medium text-text-secondary line-through truncate">
+                      <div className="min-w-0 flex-1">
+                        <p
+                          title={item.subscription.name}
+                          className="text-[15px] font-medium text-text-secondary line-through truncate"
+                        >
                           {item.subscription.name}
                         </p>
-                        <p className="text-[13px] text-text-secondary tabular-nums">
+                        <p className="font-mono text-[13px] text-text-secondary tabular-nums">
                           {formatMinorUnits(
                             item.subscription.amountMinorUnits,
                             item.subscription.currency,
@@ -540,15 +574,15 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
                           {BILLING_CYCLES[item.subscription.cycle].shortSuffix}
                         </p>
                       </div>
-                      <button
-                        type="button"
+                      <Button
+                        variant="secondary"
+                        size="sm"
                         onClick={() => onRestoreArchived(item.subscription.id)}
                         aria-label={`Restore ${item.subscription.name}`}
-                        className="min-h-[40px] px-3 py-1.5 rounded-xl bg-subtle border border-border hover:border-brand text-[13px] font-semibold text-text-primary flex items-center gap-1.5 cursor-pointer"
                       >
                         <RotateCcw className="w-3.5 h-3.5 text-brand-text" aria-hidden="true" />
                         <span>Restore</span>
-                      </button>
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -558,7 +592,7 @@ export const RadarDashboardView: React.FC<RadarDashboardViewProps> = ({
         </div>
       </div>
 
-      {/* Subscription Detail Sheet (Bottom Sheet on mobile, Right Panel on desktop) */}
+      {/* Subscription Detail Sheet */}
       <SubscriptionDetailSheet
         item={selectedItem}
         settings={settings}

@@ -82,14 +82,14 @@ export const CurrencySearchSelect: React.FC<CurrencySearchSelectProps> = ({
         aria-label={`${label}: ${selectedMeta.code} ${selectedMeta.name}`}
         data-testid={`${testId}-trigger`}
         onClick={() => setOpen((v) => !v)}
-        className="w-full min-h-[48px] px-3.5 py-2.5 rounded-xl bg-subtle border border-border hover:border-brand flex items-center justify-between gap-3 text-left transition-colors cursor-pointer"
+        className="w-full min-h-[48px] px-3.5 py-2.5 rounded-xl bg-subtle/75 border border-border hover:border-border-strong flex items-center justify-between gap-3 text-left transition-colors cursor-pointer"
       >
         <span className="flex items-center gap-3 min-w-0">
-          <span className="w-9 h-9 rounded-lg bg-card border border-border flex items-center justify-center text-[14px] font-bold text-text-primary shrink-0">
+          <span className="w-9 h-9 rounded-lg bg-card border border-border font-mono flex items-center justify-center text-[13px] font-bold text-text-primary shrink-0">
             {selectedMeta.symbol.trim()}
           </span>
           <span className="min-w-0">
-            <span className="block text-[15px] font-bold text-text-primary leading-tight">
+            <span className="block font-mono text-[14px] font-bold text-text-primary leading-tight">
               {selectedMeta.code}
             </span>
             <span className="block text-[13px] text-text-secondary truncate">
@@ -106,7 +106,7 @@ export const CurrencySearchSelect: React.FC<CurrencySearchSelectProps> = ({
       </button>
 
       {open && (
-        <div className="mt-2 rounded-xl bg-card border border-border shadow-lg overflow-hidden z-20 relative">
+        <div className="mt-2 rounded-xl app-surface-elevated overflow-hidden z-20 relative">
           <div className="p-2 border-b border-border">
             <div className="relative">
               <Search
@@ -121,7 +121,7 @@ export const CurrencySearchSelect: React.FC<CurrencySearchSelectProps> = ({
                 placeholder="Search currency (PKR, INR, SAR, USD...)"
                 aria-label="Search currencies"
                 data-testid={`${testId}-input`}
-                className="w-full h-10 pl-9 pr-9 rounded-lg bg-subtle border border-border text-[14px] text-text-primary placeholder:text-text-secondary focus:bg-card focus:border-brand"
+                className="w-full h-10 pl-9 pr-9 rounded-lg bg-subtle/80 border border-border text-[14px] text-text-primary placeholder:text-text-secondary focus:bg-card focus:border-brand transition-colors"
               />
               {query && (
                 <button
@@ -157,15 +157,15 @@ export const CurrencySearchSelect: React.FC<CurrencySearchSelectProps> = ({
                       onClick={() => handleSelect(code)}
                       className={`w-full min-h-[44px] px-3.5 py-2 flex items-center justify-between gap-3 text-left transition-colors cursor-pointer ${
                         isSelected
-                          ? 'bg-brand-soft text-brand-text'
-                          : 'hover:bg-subtle text-text-primary'
+                          ? 'bg-brand-soft/85 text-brand-text'
+                          : 'hover:bg-subtle/70 text-text-primary'
                       }`}
                     >
                       <span className="flex items-center gap-2.5 min-w-0">
-                        <span className="w-8 text-center text-[13px] font-bold text-text-secondary shrink-0">
+                        <span className="w-8 text-center font-mono text-[13px] font-bold text-text-secondary shrink-0">
                           {meta.symbol.trim()}
                         </span>
-                        <span className="text-[14px] font-bold shrink-0">{meta.code}</span>
+                        <span className="font-mono text-[14px] font-bold shrink-0">{meta.code}</span>
                         <span className="text-[13px] text-text-secondary truncate">
                           {meta.name}
                         </span>

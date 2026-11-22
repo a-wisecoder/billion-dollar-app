@@ -36,8 +36,12 @@ export interface SyncExchangeRatesOptions {
 }
 
 function getDefaultStorage(): StorageLike | null {
-  if (typeof window === 'undefined' || !window.localStorage) return null;
-  return window.localStorage;
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

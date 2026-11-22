@@ -410,15 +410,17 @@ test('backupService exports and round-trips valid backups and rejects malformed 
   );
   assert.equal(floatAmount.ok, false);
 
-  // Backwards compatibility: accepts backup without billingDay or isDemo
+  // Backwards compatibility: accepts backup without billingDay, startDate, isDemo or onboardingDone
   const legacyBackup = parseVaultBackup(
     JSON.stringify({
       schemaVersion: 1,
+      unknownRootField: 'should-be-ignored',
       settings: {
         baseCurrency: 'USD',
         monthlyCeilingMinorUnits: 20000,
         notificationsEnabled: true,
         reminderLeadDays: 2,
+        unknownSettingField: 999,
       },
       subscriptions: [
         {
@@ -429,6 +431,7 @@ test('backupService exports and round-trips valid backups and rejects malformed 
           cycle: 'monthly',
           category: 'utilities',
           nextBillingDate: '2026-11-30',
+          unknownSubField: 'drop-me',
         },
       ],
     }),
@@ -436,6 +439,197 @@ test('backupService exports and round-trips valid backups and rejects malformed 
   assert.equal(legacyBackup.ok, true);
   if (legacyBackup.ok) {
     assert.equal(legacyBackup.data.subscriptions[0].billingDay, 30);
+    assert.equal(legacyBackup.data.subscriptions[0].startDate, undefined);
     assert.equal(legacyBackup.data.settings.isDemo, false);
+    assert.equal(legacyBackup.data.settings.onboardingDone, true);
+    assert.equal('unknownRootField' in (legacyBackup.data as unknown as Record<string, unknown>), false);
+    assert.equal('unknownSettingField' in (legacyBackup.data.settings as unknown as Record<string, unknown>), false);
+    assert.equal('unknownSubField' in (legacyBackup.data.subscriptions[0] as unknown as Record<string, unknown>), false);
+  }
+});
+
+test('backupService rejects files over 1 MB and round-trips every Subscription & VaultSettings field', () => {
+  const oversized = JSON.stringify({
+    schemaVersion: 1,
+    subscriptions: [],
+    pad: 'x'.repeat(1024 * 1024 + 64),
+  });
+  const oversizedResult = parseVaultBackup(oversized);
+  assert.equal(oversizedResult.ok, false);
+  if (!oversizedResult.ok) {
+    assert.match(oversizedResult.error, /1 MB/i);
+  }
+
+  const fullSettings = {
+    ...createDefaultSettings(),
+    baseCurrency: 'PKR' as const,
+    customExchangeRates: { PKR: 281.25, EUR: 0.94 },
+    cardMarkupPercent: 3.5,
+    monthlyCeilingMinorUnits: 12500000,
+    monthlyIncomeMinorUnits: 50000000,
+    notificationsEnabled: false,
+    reminderLeadDays: 3 as const,
+    isDemo: false,
+    onboardingDone: true,
+    calendarExportedAt: '2026-11-20T10:00:00.000Z',
+    calendarExportDirty: true,
+  };
+  const fullSub: Subscription = {
+    id: 'sub_full_roundtrip',
+    name: 'Microsoft 365 Business Premium Annual Subscription',
+    catalogId: 'microsoft-365',
+    amountMinorUnits: 125000000,
+    previousAmountMinorUnits: 110000000,
+    currency: 'PKR',
+    cycle: 'yearly',
+    category: 'productivity',
+    nextBillingDate: '2027-01-31',
+    billingDay: 31,
+    startDate: '2025-01-31',
+    isFreeTrial: false,
+    isSimulatedPaused: true,
+    isArchived: false,
+    usageFrequency: 'daily',
+    cancelUrl: 'https://account.microsoft.com/services',
+    notes: 'Annual business license',
+  };
+
+  const exported = exportVaultBackup([fullSub], fullSettings);
+  const reimported = parseVaultBackup(exported);
+  assert.equal(reimported.ok, true);
+  if (reimported.ok) {
+    assert.deepEqual(reimported.data.subscriptions[0], fullSub);
+    assert.deepEqual(reimported.data.settings, fullSettings);
+  }
+});
+
+test('date math edge dates: 2026-01-31, 2026-02-28, 2028-02-29, 2026-12-31, 12 months of 31st, trials, and weekly month-end crossings', () => {
+  // 12 consecutive months for a monthly subscription anchored to day 31
+  const expected12Months = [
+    [2026, 1, '2026-01-31'],
+    [2026, 2, '2026-02-28'],
+    [2026, 3, '2026-03-31'],
+    [2026, 4, '2026-04-30'],
+    [2026, 5, '2026-05-31'],
+    [2026, 6, '2026-06-30'],
+    [2026, 7, '2026-07-31'],
+    [2026, 8, '2026-08-31'],
+    [2026, 9, '2026-09-30'],
+    [2026, 10, '2026-10-31'],
+    [2026, 11, '2026-11-30'],
+    [2026, 12, '2026-12-31'],
+  ] as const;
+
+  for (const [year, month, expectedIso] of expected12Months) {
+    assert.deepEqual(
+      projectBillingDatesInMonth('2026-01-31', 'monthly', year, month, 31),
+      [expectedIso],
+    );
+  }
+
+  // Leap year Feb 29, 2028
+  assert.deepEqual(
+    projectBillingDatesInMonth('2026-01-31', 'monthly', 2028, 2, 31),
+    ['2028-02-29'],
+  );
+
+  // Advancing overdue billing dates with today = 2026-01-31, 2026-02-28, 2028-02-29, 2026-12-31
+  assert.equal(advanceOverdueBillingDate('2026-01-31', 'monthly', '2026-01-31', 31), '2026-01-31');
+  assert.equal(advanceOverdueBillingDate('2026-01-31', 'monthly', '2026-02-28', 31), '2026-02-28');
+  assert.equal(advanceOverdueBillingDate('2028-01-31', 'monthly', '2028-02-29', 31), '2028-02-29');
+  assert.equal(advanceOverdueBillingDate('2026-11-30', 'monthly', '2026-12-31', 31), '2026-12-31');
+  assert.equal(advanceOverdueBillingDate('2026-12-31', 'yearly', '2027-01-01', 31), '2027-12-31');
+
+  // Weekly bills crossing month ends, leap Feb 29, and year end
+  assert.equal(advanceOverdueBillingDate('2026-01-29', 'weekly', '2026-01-31'), '2026-02-05');
+  assert.equal(advanceOverdueBillingDate('2026-02-26', 'weekly', '2026-02-28'), '2026-03-05');
+  assert.equal(advanceOverdueBillingDate('2028-02-24', 'weekly', '2028-02-29'), '2028-03-02');
+  assert.equal(advanceOverdueBillingDate('2026-12-28', 'weekly', '2026-12-31'), '2027-01-04');
+
+  // Trials do not auto-advance when overdue on edge dates
+  const trialSub: Subscription = {
+    id: 'trial_edge',
+    name: 'Edge Trial',
+    amountMinorUnits: 1999,
+    currency: 'USD',
+    cycle: 'monthly',
+    category: 'aiAndCloud',
+    nextBillingDate: '2026-02-28',
+    billingDay: 28,
+    isFreeTrial: true,
+    isSimulatedPaused: false,
+    isArchived: false,
+    notes: '',
+  };
+  const normalized = normalizeOverdueSubscriptions([trialSub], '2028-02-29');
+  assert.equal(normalized[0].nextBillingDate, '2026-02-28');
+});
+
+test('all multi-currency sums in cashflowEngine and timelineEngine remain exact safe integers', () => {
+  const settings = {
+    ...createDefaultSettings(),
+    baseCurrency: 'PKR' as const,
+    cardMarkupPercent: 3.5,
+  };
+  const subs: Subscription[] = [
+    {
+      id: 'm1',
+      name: 'USD Sub',
+      amountMinorUnits: 1999,
+      currency: 'USD',
+      cycle: 'monthly',
+      category: 'aiAndCloud',
+      nextBillingDate: '2026-11-25',
+      billingDay: 25,
+      isFreeTrial: false,
+      isSimulatedPaused: false,
+      isArchived: false,
+      notes: '',
+    },
+    {
+      id: 'm2',
+      name: 'PKR Enterprise Sub',
+      amountMinorUnits: 125000000,
+      currency: 'PKR',
+      cycle: 'yearly',
+      category: 'productivity',
+      nextBillingDate: '2026-11-28',
+      billingDay: 28,
+      isFreeTrial: false,
+      isSimulatedPaused: false,
+      isArchived: false,
+      notes: '',
+    },
+    {
+      id: 'm3',
+      name: 'GBP Weekly Sub',
+      amountMinorUnits: 499,
+      currency: 'GBP',
+      cycle: 'weekly',
+      category: 'news',
+      nextBillingDate: '2026-11-22',
+      billingDay: 22,
+      isFreeTrial: false,
+      isSimulatedPaused: true,
+      isArchived: false,
+      notes: '',
+    },
+  ];
+
+  const summary = computeCashflowSummary(subs, settings, {
+    selectedCategory: null,
+    showAnnual: false,
+    searchQuery: '',
+    todayIso: '2026-11-20',
+  });
+  assert.ok(Number.isSafeInteger(summary.activeMonthlyBaseMinorUnits));
+  assert.ok(Number.isSafeInteger(summary.activeAnnualBaseMinorUnits));
+  assert.ok(Number.isSafeInteger(summary.displayedTotalBaseMinorUnits));
+  assert.ok(Number.isSafeInteger(summary.simulatedAnnualSavingsBaseMinorUnits));
+
+  const timeline = computeMonthTimeline(subs, settings, 2026, 11);
+  assert.ok(Number.isSafeInteger(timeline.totalMonthBaseMinorUnits));
+  for (const day of timeline.days) {
+    assert.ok(Number.isSafeInteger(day.totalBaseMinorUnits));
   }
 });

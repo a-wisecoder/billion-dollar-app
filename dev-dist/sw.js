@@ -81,11 +81,11 @@ define(['./workbox-841e1dd6'], (function (workbox) { 'use strict';
    * See https://goo.gl/S9QRab
    */
   workbox.precacheAndRoute([{
-    "url": "/index.html",
-    "revision": "0.qbk70cqs7e8"
+    "url": "/app/index.html",
+    "revision": "0.4qr8a9jbl48"
   }], {});
   workbox.cleanupOutdatedCaches();
-  workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("/index.html"), {
+  workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("/app/index.html"), {
     allowlist: [/^\/$/]
   }));
   workbox.registerRoute(/^https:\/\/open\.er-api\.com\/v6\/latest\/USD/, new workbox.StaleWhileRevalidate({

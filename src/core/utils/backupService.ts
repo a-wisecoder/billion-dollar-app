@@ -76,7 +76,17 @@ function isUsageFrequency(value: unknown): value is UsageFrequency {
   return typeof value === 'string' && (USAGE_FREQUENCY_LIST as readonly string[]).includes(value);
 }
 
+export const MAX_BACKUP_BYTES = 1024 * 1024;
+
 export function parseVaultBackup(rawJson: string): BackupParseResult {
+  const byteLength = new TextEncoder().encode(rawJson).byteLength;
+  if (byteLength > MAX_BACKUP_BYTES) {
+    return {
+      ok: false,
+      error: 'Backup file is too large (max 1 MB). Please choose a valid VaultFlow backup.',
+    };
+  }
+
   const trimmed = rawJson.trim();
   if (!trimmed) {
     return { ok: false, error: 'Backup JSON cannot be empty.' };

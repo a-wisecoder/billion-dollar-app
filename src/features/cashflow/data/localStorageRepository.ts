@@ -14,6 +14,21 @@ const INITIALIZED_KEY = 'vaultflow_initialized_v1';
 export interface StoredVaultState {
   readonly subscriptions: Subscription[];
   readonly settings: VaultSettings;
+  readonly storageAvailable: boolean;
+}
+
+export interface StorageSaveResult {
+  readonly ok: boolean;
+  readonly reason?: 'blocked' | 'quota';
+}
+
+function getSafeLocalStorage(): Storage | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function resolveBillingDay(sub: Subscription): number {
@@ -68,17 +83,20 @@ function createFreshSettingsForLocale(): VaultSettings {
 }
 
 export function loadVaultState(todayIso: string = getTodayIso()): StoredVaultState {
-  if (typeof window === 'undefined' || !window.localStorage) {
+  const storage = getSafeLocalStorage();
+  if (!storage) {
     return {
       subscriptions: [],
       settings: createFreshSettingsForLocale(),
+      storageAvailable: false,
     };
   }
 
   const defaults = createFreshSettingsForLocale();
+  let storageAvailable = true;
   let parsedSettings: Partial<VaultSettings> | null = null;
   try {
-    const rawSettings = window.localStorage.getItem(SETTINGS_KEY);
+    const rawSettings = storage.getItem(SETTINGS_KEY);
     if (rawSettings) {
       parsedSettings = JSON.parse(rawSettings) as Partial<VaultSettings>;
     }
@@ -88,7 +106,7 @@ export function loadVaultState(todayIso: string = getTodayIso()): StoredVaultSta
 
   let subscriptions: Subscription[] = [];
   try {
-    const rawSubs = window.localStorage.getItem(SUBSCRIPTIONS_KEY);
+    const rawSubs = storage.getItem(SUBSCRIPTIONS_KEY);
     if (rawSubs) {
       const parsed = JSON.parse(rawSubs);
       if (Array.isArray(parsed)) {
@@ -99,7 +117,12 @@ export function loadVaultState(todayIso: string = getTodayIso()): StoredVaultSta
     subscriptions = [];
   }
 
-  const hasInitialized = window.localStorage.getItem(INITIALIZED_KEY) === '1';
+  let hasInitialized = false;
+  try {
+    hasInitialized = storage.getItem(INITIALIZED_KEY) === '1';
+  } catch {
+    storageAvailable = false;
+  }
 
   const settings: VaultSettings = parsedSettings
     ? {
@@ -130,24 +153,34 @@ export function loadVaultState(todayIso: string = getTodayIso()): StoredVaultSta
         onboardingDone: subscriptions.length > 0,
       };
 
-  return { subscriptions, settings };
+  return { subscriptions, settings, storageAvailable };
 }
 
-export function saveSubscriptions(items: readonly Subscription[]): void {
-  if (typeof window === 'undefined' || !window.localStorage) return;
+export function saveSubscriptions(items: readonly Subscription[]): StorageSaveResult {
+  const storage = getSafeLocalStorage();
+  if (!storage) return { ok: false, reason: 'blocked' };
   try {
-    window.localStorage.setItem(SUBSCRIPTIONS_KEY, JSON.stringify(items));
-    window.localStorage.setItem(INITIALIZED_KEY, '1');
-  } catch {
-    // Storage quota or restricted browsing context — keep in-memory state working.
+    storage.setItem(SUBSCRIPTIONS_KEY, JSON.stringify(items));
+    storage.setItem(INITIALIZED_KEY, '1');
+    return { ok: true };
+  } catch (err) {
+    const name = err instanceof Error ? err.name : '';
+    const isQuota =
+      name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED';
+    return { ok: false, reason: isQuota ? 'quota' : 'blocked' };
   }
 }
 
-export function saveSettings(settings: VaultSettings): void {
-  if (typeof window === 'undefined' || !window.localStorage) return;
+export function saveSettings(settings: VaultSettings): StorageSaveResult {
+  const storage = getSafeLocalStorage();
+  if (!storage) return { ok: false, reason: 'blocked' };
   try {
-    window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  } catch {
-    // Ignore storage quota errors gracefully.
+    storage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    return { ok: true };
+  } catch (err) {
+    const name = err instanceof Error ? err.name : '';
+    const isQuota =
+      name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED';
+    return { ok: false, reason: isQuota ? 'quota' : 'blocked' };
   }
 }

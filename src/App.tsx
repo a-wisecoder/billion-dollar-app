@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   CalendarDays,
   CalendarPlus,
   Home,
@@ -11,12 +12,21 @@ import {
   Undo2,
   X,
 } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { trackEvent } from './core/analytics/analytics';
+import { useDialogA11y } from './core/hooks/useDialogA11y';
+import { Button } from './core/ui/primitives';
 import {
   applyThemeToDocument,
   loadThemeMode,
   saveThemeMode,
   type ThemeMode,
 } from './core/theme/themeService';
+import {
+  formatTabHash,
+  parseTabFromLocation,
+  type AppTabId,
+} from './core/utils/appTabHash';
 import { advanceOverdueBillingDate, getTodayIso } from './core/utils/dateMath';
 import {
   loadCachedExchangeRates,
@@ -24,8 +34,13 @@ import {
 } from './core/utils/exchangeRates';
 import { computeLeakAudit } from './features/audit/domain/auditEngine';
 import type { StatementImportCandidate } from './features/audit/domain/statementImport';
-import { AuditAndImportView } from './features/audit/presentation/AuditAndImportView';
 import { CancelKitModal } from './features/audit/presentation/CancelKitModal';
+
+const AuditAndImportView = lazy(() =>
+  import('./features/audit/presentation/AuditAndImportView').then((m) => ({
+    default: m.AuditAndImportView,
+  })),
+);
 import { getLicenseProvider } from './features/billing/data/licenseProvider';
 import {
   clearLicenseRecord,
@@ -74,7 +89,7 @@ import {
 import { TimelineView } from './features/timeline/presentation/TimelineView';
 import { VaultSettingsView } from './features/vault/presentation/VaultSettingsView';
 
-type TabId = 'home' | 'calendar' | 'insights' | 'settings';
+type TabId = AppTabId;
 
 type UndoToastState =
   | { readonly kind: 'delete'; readonly sub: Subscription }
@@ -109,13 +124,7 @@ const NAV_TABS: readonly {
 
 function getInitialTab(): TabId {
   if (typeof window === 'undefined') return 'home';
-  const params = new URLSearchParams(window.location.search);
-  const tabParam = params.get('tab');
-  if (tabParam === 'home' || tabParam === 'radar') return 'home';
-  if (tabParam === 'calendar' || tabParam === 'timeline') return 'calendar';
-  if (tabParam === 'insights' || tabParam === 'audit') return 'insights';
-  if (tabParam === 'settings' || tabParam === 'vault') return 'settings';
-  return 'home';
+  return parseTabFromLocation(window.location.hash, window.location.search);
 }
 
 export const App: React.FC = () => {
@@ -123,7 +132,27 @@ export const App: React.FC = () => {
   const initialTab = useMemo(() => getInitialTab(), []);
 
   const [activeTab, setActiveTab] = useState<TabId>(initialTab);
+  const [bypassOnboardingForDeepLink] = useState<boolean>(() => initialTab !== 'home');
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemeMode());
+
+  const selectTab = useCallback((nextTab: TabId) => {
+    setActiveTab(nextTab);
+    if (typeof window !== 'undefined') {
+      const targetHash = formatTabHash(nextTab);
+      if (window.location.hash !== targetHash) {
+        window.location.hash = targetHash;
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleHashChange = () => {
+      setActiveTab(parseTabFromLocation(window.location.hash, window.location.search));
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
 
   const [subscriptions, setSubscriptions] = useState<Subscription[]>(initial.subscriptions);
   const [settings, setSettings] = useState<VaultSettings>(initial.settings);
@@ -174,15 +203,38 @@ export const App: React.FC = () => {
   } | null>(null);
   const revalidatingLicenseRef = useRef(false);
 
+  const [storageWarning, setStorageWarning] = useState<'blocked' | 'quota' | null>(() =>
+    initial.storageAvailable ? null : 'blocked',
+  );
+  const [storageWarningDismissed, setStorageWarningDismissed] = useState(false);
+
+  const demoDialogRef = useRef<HTMLDivElement | null>(null);
+  const handleCloseDemoPrompt = useCallback(() => {
+    setPendingDemoAction(null);
+  }, []);
+  useDialogA11y({
+    isOpen: Boolean(pendingDemoAction),
+    containerRef: demoDialogRef,
+    onClose: handleCloseDemoPrompt,
+  });
+
   const [undoToast, setUndoToast] = useState<UndoToastState | null>(null);
   const undoTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    saveSubscriptions(subscriptions);
+    const res = saveSubscriptions(subscriptions);
+    if (!res.ok && res.reason) {
+      setStorageWarning(res.reason);
+      setStorageWarningDismissed(false);
+    }
   }, [subscriptions]);
 
   useEffect(() => {
-    saveSettings(settings);
+    const res = saveSettings(settings);
+    if (!res.ok && res.reason) {
+      setStorageWarning(res.reason);
+      setStorageWarningDismissed(false);
+    }
   }, [settings]);
 
   useEffect(() => {
@@ -341,10 +393,10 @@ export const App: React.FC = () => {
       computeCashflowSummary(subscriptions, effectiveSettings, {
         selectedCategory,
         showAnnual,
-        searchQuery,
+        searchQuery: '',
         todayIso,
       }),
-    [subscriptions, effectiveSettings, selectedCategory, showAnnual, searchQuery, todayIso],
+    [subscriptions, effectiveSettings, selectedCategory, showAnnual, todayIso],
   );
 
   const audit = useMemo(
@@ -428,6 +480,7 @@ export const App: React.FC = () => {
         setPendingUpgradeAction(null);
       }
       setUpgradeSheetOpen(true);
+      trackEvent('paywall_viewed');
     },
     [],
   );
@@ -490,6 +543,7 @@ export const App: React.FC = () => {
   const handleExportAllCalendar = useCallback(() => {
     const ics = buildIcs(subscriptions, settings, new Date().toISOString());
     triggerIcsDownload(ics, 'subscription-renewals.ics');
+    trackEvent('calendar_exported');
     setSettings((prev) => ({
       ...prev,
       calendarExportedAt: new Date().toISOString(),
@@ -503,11 +557,13 @@ export const App: React.FC = () => {
       if (!target) return;
       const ics = buildIcs([target], settings, new Date().toISOString());
       triggerIcsDownload(ics, slugifyIcsFilename(target.name));
+      trackEvent('calendar_exported');
     },
     [subscriptions, settings, triggerIcsDownload],
   );
 
   const commitSubscriptionSave = (saved: Subscription) => {
+    const isNew = !subscriptions.some((item) => item.id === saved.id);
     setSubscriptions((prev) => {
       const exists = prev.some((item) => item.id === saved.id);
       if (exists) {
@@ -515,6 +571,9 @@ export const App: React.FC = () => {
       }
       return [...prev, saved];
     });
+    if (isNew) {
+      trackEvent('subscription_added');
+    }
     markCalendarDirtyIfExported();
   };
 
@@ -530,7 +589,7 @@ export const App: React.FC = () => {
     commitSubscriptionSave(saved);
   };
 
-  const handleToggleSimulate = (id: string) => {
+  const handleToggleSimulate = useCallback((id: string) => {
     setSubscriptions((prev) =>
       prev.map((item) =>
         item.id === id
@@ -538,7 +597,7 @@ export const App: React.FC = () => {
           : item,
       ),
     );
-  };
+  }, []);
 
   const handleUpdateUsageFrequency = (id: string, usageFrequency: UsageFrequency) => {
     setSubscriptions((prev) =>
@@ -637,6 +696,9 @@ export const App: React.FC = () => {
       return next;
     });
     markCalendarDirtyIfExported();
+    if (candidates.length > 0) {
+      trackEvent('import_completed');
+    }
   };
 
   const handleImportStatementCandidates = (
@@ -699,6 +761,7 @@ export const App: React.FC = () => {
     setLicenseClockMs(Date.now());
     setUpgradeSheetOpen(false);
     setUpgradeContextMessage(null);
+    trackEvent('license_activated');
 
     const pending = pendingUpgradeAction;
     setPendingUpgradeAction(null);
@@ -818,8 +881,13 @@ export const App: React.FC = () => {
     }));
     if (payload.subscriptions.length > 0) {
       setSubscriptions(payload.subscriptions);
+      trackEvent('subscription_added');
     }
-    setActiveTab('home');
+    if (payload.exportedCalendar) {
+      trackEvent('calendar_exported');
+    }
+    trackEvent('onboarding_completed');
+    selectTab('home');
   };
 
   const handleOnboardingImport = (baseCurrency: CurrencyCode) => {
@@ -828,7 +896,8 @@ export const App: React.FC = () => {
       isDemo: false,
       onboardingDone: true,
     }));
-    setActiveTab('insights');
+    trackEvent('onboarding_completed');
+    selectTab('insights');
   };
 
   const handleOnboardingSampleData = (baseCurrency: CurrencyCode) => {
@@ -839,7 +908,8 @@ export const App: React.FC = () => {
       onboardingDone: true,
     }));
     setSelectedCategory(null);
-    setActiveTab('home');
+    trackEvent('onboarding_completed');
+    selectTab('home');
   };
 
   const handleResetSimulations = () => {
@@ -943,28 +1013,46 @@ export const App: React.FC = () => {
     }
   };
 
-  const showOnboarding = subscriptions.length === 0 && !settings.onboardingDone;
+  const showOnboarding =
+    subscriptions.length === 0 && !settings.onboardingDone && !bypassOnboardingForDeepLink;
 
   return (
-    <div className="min-h-screen bg-page text-text-primary flex flex-col">
-      {/* Top Bar: Mobile shows only logo; Desktop shows logo, 4 nav links, and Add subscription */}
-      <header className="sticky top-0 z-30 bg-page/90 backdrop-blur-md border-b border-border">
-        <div className="max-w-6xl mx-auto h-14 md:h-16 px-4 sm:px-6 flex items-center justify-between gap-8">
+    <div className="min-h-screen app-canvas text-text-primary flex flex-col">
+      {/* Top Bar: Strict 3-zone Mercury/Linear header (Brand | Navigation | Primary CTA) */}
+      <header className="sticky top-0 z-30 bg-page/85 backdrop-blur-xl border-b border-border/80">
+        <div className="max-w-6xl mx-auto h-14 md:h-16 px-4 sm:px-6 flex items-center justify-between gap-6">
           <a
             href="#home"
             onClick={(e) => {
               e.preventDefault();
-              if (!showOnboarding) setActiveTab('home');
+              if (!showOnboarding) selectTab('home');
             }}
-            className="text-lg font-extrabold tracking-tight text-text-primary whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-2.5 text-text-primary whitespace-nowrap shrink-0 group"
           >
-            VaultFlow
+            <span
+              className="w-7 h-7 rounded-[9px] bg-brand text-white flex items-center justify-center shadow-[0_1px_3px_rgba(15,107,84,0.3),inset_0_1px_0_rgba(255,255,255,0.22)] transition-transform duration-150 group-hover:scale-[1.03]"
+              aria-hidden="true"
+            >
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M2.5 4.25L8 12.75L13.5 4.25"
+                  stroke="currentColor"
+                  strokeWidth="2.1"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <circle cx="8" cy="4.25" r="1.4" fill="currentColor" />
+              </svg>
+            </span>
+            <span className="font-display text-[19px] font-bold tracking-[-0.025em]">
+              VaultFlow
+            </span>
           </a>
 
           {!showOnboarding && (
             <>
               <nav
-                className="hidden md:flex items-center gap-7"
+                className="hidden md:flex items-center gap-1"
                 aria-label="Primary navigation"
               >
                 {NAV_TABS.map(({ id, label }) => {
@@ -974,17 +1062,19 @@ export const App: React.FC = () => {
                       key={id}
                       type="button"
                       aria-current={active ? 'page' : undefined}
-                      onClick={() => setActiveTab(id)}
-                      className={`relative py-1 text-sm font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                      onClick={() => selectTab(id)}
+                      className={`relative px-3.5 py-2 rounded-lg text-[14px] font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                         active
                           ? 'text-text-primary'
-                          : 'text-text-secondary hover:text-text-primary'
+                          : 'text-text-secondary hover:text-text-primary hover:bg-subtle/60'
                       }`}
                     >
                       {label}
                       {active && (
-                        <span
-                          className="absolute left-0 right-0 -bottom-[21px] h-0.5 bg-brand"
+                        <motion.span
+                          layoutId="desktop-nav-indicator"
+                          transition={{ type: 'spring', stiffness: 520, damping: 38, mass: 0.7 }}
+                          className="absolute left-3 right-3 -bottom-[14px] h-[2px] rounded-full bg-brand"
                           aria-hidden="true"
                         />
                       )}
@@ -994,14 +1084,10 @@ export const App: React.FC = () => {
               </nav>
 
               <div className="hidden md:flex items-center shrink-0">
-                <button
-                  type="button"
-                  onClick={openAddModal}
-                  className="min-h-[40px] px-4 py-2 rounded-xl bg-brand hover:bg-brand-hover text-[13px] font-semibold text-white flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                >
+                <Button variant="primary" size="md" onClick={openAddModal}>
                   <Plus className="w-4 h-4" aria-hidden="true" />
                   <span>Add subscription</span>
-                </button>
+                </Button>
               </div>
             </>
           )}
@@ -1009,7 +1095,7 @@ export const App: React.FC = () => {
       </header>
 
       {/* Main Content Canvas (extra bottom padding on mobile so 56px + button & tab bar never cover last row) */}
-      <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 pt-5 sm:pt-6 pb-36 md:pb-12">
+      <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 pt-5 sm:pt-7 pb-36 md:pb-14">
         {showOnboarding ? (
           <OnboardingFlow
             settings={effectiveSettings}
@@ -1028,12 +1114,38 @@ export const App: React.FC = () => {
           />
         ) : (
           <>
+        {/* Storage Blocked / Quota Warning Banner */}
+        {storageWarning && !storageWarningDismissed && (
+          <div
+            role="alert"
+            data-testid="storage-warning-banner"
+            className="mb-5 rounded-2xl bg-amber-soft/90 border border-amber-border px-4 py-3 flex items-start justify-between gap-3"
+          >
+            <div className="flex items-start gap-2.5 min-w-0">
+              <AlertTriangle className="w-4 h-4 text-amber shrink-0 mt-0.5" aria-hidden="true" />
+              <p className="text-[13px] font-medium text-text-primary leading-relaxed">
+                {storageWarning === 'quota'
+                  ? 'Browser storage is full. Changes stay active for this session — export a JSON backup in Settings so you do not lose edits.'
+                  : 'Browser storage is blocked (for example, in Private mode). Changes stay active for this session — export a JSON backup in Settings before closing.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setStorageWarningDismissed(true)}
+              aria-label="Dismiss storage warning"
+              className="min-h-[36px] min-w-[36px] shrink-0 rounded-lg text-text-secondary hover:text-text-primary hover:bg-card/60 flex items-center justify-center cursor-pointer transition-colors"
+            >
+              <X className="w-4 h-4" aria-hidden="true" />
+            </button>
+          </div>
+        )}
+
         {/* Sample Data Mode Banner (visible on every tab while settings.isDemo is true) */}
         {settings.isDemo && (
           <div
             role="status"
             data-testid="sample-data-banner"
-            className="mb-5 rounded-2xl bg-brand-soft border border-brand-border px-4 py-2.5 flex flex-wrap items-center justify-between gap-2.5"
+            className="mb-5 rounded-2xl bg-brand-soft/85 border border-brand-border px-4 py-2.5 flex flex-wrap items-center justify-between gap-2.5"
           >
             <div className="flex items-center gap-2 min-w-0">
               <Info className="w-4 h-4 text-brand-text shrink-0" aria-hidden="true" />
@@ -1043,32 +1155,29 @@ export const App: React.FC = () => {
             </div>
 
             {!confirmClearDemoBanner ? (
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => setConfirmClearDemoBanner(true)}
-                className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-card border border-brand-border hover:border-brand text-[13px] font-semibold text-brand-text transition-colors cursor-pointer"
+                className="border-brand-border text-brand-text hover:border-brand"
               >
                 Clear and add mine
-              </button>
+              </Button>
             ) : (
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[13px] font-medium text-text-secondary">
                   Clear sample items and start fresh?
                 </span>
-                <button
-                  type="button"
-                  onClick={handleClearSampleAndAdd}
-                  className="min-h-[38px] px-3 rounded-xl bg-brand hover:bg-brand-hover text-[13px] font-semibold text-white cursor-pointer"
-                >
+                <Button variant="primary" size="sm" onClick={handleClearSampleAndAdd}>
                   Confirm
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => setConfirmClearDemoBanner(false)}
-                  className="min-h-[38px] px-3 rounded-xl bg-card border border-border text-[13px] font-semibold text-text-primary cursor-pointer"
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -1079,7 +1188,7 @@ export const App: React.FC = () => {
           <div
             role="status"
             data-testid="calendar-outdated-banner"
-            className="mb-5 rounded-2xl bg-subtle border border-border px-4 py-2.5 flex flex-wrap items-center justify-between gap-2.5"
+            className="mb-5 rounded-2xl app-surface px-4 py-2.5 flex flex-wrap items-center justify-between gap-2.5"
           >
             <div className="flex items-center gap-2 min-w-0">
               <CalendarPlus className="w-4 h-4 text-brand-text shrink-0" aria-hidden="true" />
@@ -1087,14 +1196,15 @@ export const App: React.FC = () => {
                 Your calendar is out of date — export again.
               </span>
             </div>
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={handleExportAllCalendar}
               data-testid="calendar-export-again-button"
-              className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-card border border-border hover:border-brand text-[13px] font-semibold text-brand-text transition-colors cursor-pointer"
+              className="text-brand-text"
             >
               Export again
-            </button>
+            </Button>
           </div>
         )}
 
@@ -1124,7 +1234,7 @@ export const App: React.FC = () => {
             onOpenUpgrade={() => openUpgradeSheet()}
             onDeleteClick={handleDeleteSubscription}
             onEditCeilingClick={() => setCeilingModalOpen(true)}
-            onOpenAuditTab={() => setActiveTab('insights')}
+            onOpenAuditTab={() => selectTab('insights')}
             onExpiredTrialCancelled={handleArchiveSubscription}
             onExpiredTrialPaid={handleExpiredTrialPaid}
           />
@@ -1141,18 +1251,40 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'insights' && (
-          <AuditAndImportView
-            subscriptions={subscriptions}
-            audit={audit}
-            settings={effectiveSettings}
-            entitlements={entitlements}
-            onOpenCancelKit={setCancelKitSubId}
-            onToggleSimulate={handleToggleSimulate}
-            onImportCandidates={handleImportStatementCandidates}
-            onAddSingleCandidate={handleAddSingleStatementCandidate}
-            onOpenUpgradeForImport={handleOpenUpgradeForImport}
-            postUpgradeImportNotice={postUpgradeImportNotice}
-          />
+          <Suspense
+            fallback={
+              <div role="status" aria-label="Loading Insights" className="space-y-6">
+                <div className="space-y-2">
+                  <div className="h-8 w-36 rounded-lg bg-subtle animate-pulse" />
+                  <div className="h-4 w-72 max-w-full rounded-md bg-subtle animate-pulse" />
+                </div>
+                <div className="rounded-2xl app-surface p-6 space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="h-16 rounded-xl bg-subtle animate-pulse" />
+                    <div className="h-16 rounded-xl bg-subtle animate-pulse" />
+                    <div className="h-16 rounded-xl bg-subtle animate-pulse" />
+                  </div>
+                </div>
+                <div className="rounded-2xl app-surface p-6 space-y-3">
+                  <div className="h-5 w-44 rounded-md bg-subtle animate-pulse" />
+                  <div className="h-28 rounded-xl bg-subtle animate-pulse" />
+                </div>
+              </div>
+            }
+          >
+            <AuditAndImportView
+              subscriptions={subscriptions}
+              audit={audit}
+              settings={effectiveSettings}
+              entitlements={entitlements}
+              onOpenCancelKit={setCancelKitSubId}
+              onToggleSimulate={handleToggleSimulate}
+              onImportCandidates={handleImportStatementCandidates}
+              onAddSingleCandidate={handleAddSingleStatementCandidate}
+              onOpenUpgradeForImport={handleOpenUpgradeForImport}
+              postUpgradeImportNotice={postUpgradeImportNotice}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'settings' && (
@@ -1201,7 +1333,7 @@ export const App: React.FC = () => {
             onClick={openAddModal}
             aria-label="Add subscription"
             data-testid="mobile-add-fab"
-            className="md:hidden fixed right-4 bottom-20 z-40 w-14 h-14 rounded-full bg-brand hover:bg-brand-hover text-white shadow-lg flex items-center justify-center transition-transform active:scale-95 cursor-pointer"
+            className="md:hidden fixed right-4 bottom-20 z-40 w-14 h-14 rounded-full bg-brand hover:bg-brand-hover text-white shadow-[0_8px_24px_-4px_rgba(15,107,84,0.45),inset_0_1px_0_rgba(255,255,255,0.24)] flex items-center justify-center transition-transform active:scale-95 cursor-pointer"
           >
             <Plus className="w-6 h-6" aria-hidden="true" />
           </button>
@@ -1209,7 +1341,7 @@ export const App: React.FC = () => {
           {/* Mobile Pinned Bottom Tab Bar (4 tabs: Home, Calendar, Insights, Settings) */}
           <nav
             aria-label="Mobile navigation"
-            className="md:hidden fixed bottom-0 inset-x-0 z-40 w-full min-h-16 pb-[env(safe-area-inset-bottom)] bg-card/95 backdrop-blur-md border-t border-border shadow-[0_-6px_20px_-8px_rgba(23,33,30,0.12)] grid grid-cols-4 items-center px-1"
+            className="md:hidden fixed bottom-0 inset-x-0 z-40 w-full min-h-[60px] pb-[env(safe-area-inset-bottom)] bg-card/95 backdrop-blur-xl border-t border-border/90 shadow-[0_-8px_24px_-12px_rgba(15,26,23,0.14)] grid grid-cols-4 items-center px-1"
           >
             {NAV_TABS.map(({ id, label, Icon }) => {
               const active = activeTab === id;
@@ -1218,12 +1350,20 @@ export const App: React.FC = () => {
                   key={id}
                   type="button"
                   aria-current={active ? 'page' : undefined}
-                  onClick={() => setActiveTab(id)}
-                  className={`min-h-[48px] flex flex-col items-center justify-center gap-1 rounded-xl transition-colors cursor-pointer ${
+                  onClick={() => selectTab(id)}
+                  className={`relative min-h-[52px] flex flex-col items-center justify-center gap-1 rounded-xl transition-colors cursor-pointer ${
                     active ? 'text-brand-text' : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >
-                  <Icon className="w-5 h-5" aria-hidden={true} />
+                  {active && (
+                    <motion.span
+                      layoutId="mobile-nav-indicator"
+                      transition={{ type: 'spring', stiffness: 520, damping: 38, mass: 0.7 }}
+                      className="absolute top-0 inset-x-5 h-[2px] rounded-full bg-brand"
+                      aria-hidden="true"
+                    />
+                  )}
+                  <Icon className="w-[19px] h-[19px]" aria-hidden={true} />
                   <span className="text-xs font-semibold tracking-tight">{label}</span>
                 </button>
               );
@@ -1233,99 +1373,126 @@ export const App: React.FC = () => {
       )}
 
       {/* PWA Update Toast */}
-      {pwaUpdate.needRefresh && !undoToast && (
-        <div
-          role="status"
-          aria-live="polite"
-          data-testid="pwa-update-toast"
-          className="fixed bottom-36 md:bottom-6 left-1/2 -translate-x-1/2 z-40 rounded-xl bg-text-primary text-card px-4 py-3 shadow-xl flex items-center gap-3 max-w-[calc(100vw-2rem)]"
-        >
-          <span className="text-[13px] font-medium">Update available</span>
-          <button
-            type="button"
-            onClick={() => {
-              void pwaUpdate.reloadForUpdate();
-            }}
-            className="min-h-[36px] px-3 py-1 rounded-lg bg-brand hover:bg-brand-hover text-[13px] font-semibold text-white flex items-center gap-1.5 cursor-pointer shrink-0"
+      <AnimatePresence>
+        {pwaUpdate.needRefresh && !undoToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 14, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.98 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            role="status"
+            aria-live="polite"
+            data-testid="pwa-update-toast"
+            className="fixed bottom-36 md:bottom-6 left-1/2 -translate-x-1/2 z-40 rounded-2xl bg-text-primary text-card px-4 py-2.5 shadow-2xl flex items-center gap-3 max-w-[calc(100vw-2rem)]"
           >
-            <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Reload</span>
-          </button>
-          <button
-            type="button"
-            onClick={pwaUpdate.dismissUpdate}
-            aria-label="Dismiss update notice"
-            className="min-h-[36px] min-w-[36px] rounded-lg hover:bg-white/10 text-card flex items-center justify-center cursor-pointer shrink-0"
-          >
-            <X className="w-4 h-4" aria-hidden="true" />
-          </button>
-        </div>
-      )}
+            <span className="text-[13px] font-medium">Update available</span>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                void pwaUpdate.reloadForUpdate();
+              }}
+            >
+              <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Reload</span>
+            </Button>
+            <button
+              type="button"
+              onClick={pwaUpdate.dismissUpdate}
+              aria-label="Dismiss update notice"
+              className="min-h-[36px] min-w-[36px] rounded-lg hover:bg-white/10 text-card flex items-center justify-center cursor-pointer shrink-0"
+            >
+              <X className="w-4 h-4" aria-hidden="true" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Undo Toast (6s) */}
-      {undoToast && (
-        <div
-          role="status"
-          aria-live="assertive"
-          data-testid="undo-toast"
-          className="fixed bottom-36 md:bottom-6 left-1/2 -translate-x-1/2 z-40 rounded-xl bg-text-primary text-card px-4 py-3 shadow-xl flex items-center gap-4 max-w-[calc(100vw-2rem)]"
-        >
-          <span className="text-[13px] font-medium truncate">
-            {undoToast.kind === 'delete'
-              ? `Removed ${undoToast.sub.name}`
-              : undoToast.message}
-          </span>
-          <button
-            type="button"
-            onClick={handleUndo}
-            className="min-h-[36px] px-3 py-1 rounded-lg bg-brand hover:bg-brand-hover text-[13px] font-semibold text-white flex items-center gap-1 cursor-pointer shrink-0"
+      <AnimatePresence>
+        {undoToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 14, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.98 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            role="status"
+            aria-live="assertive"
+            data-testid="undo-toast"
+            className="fixed bottom-36 md:bottom-6 left-1/2 -translate-x-1/2 z-40 rounded-2xl bg-text-primary text-card px-4 py-2.5 shadow-2xl flex items-center gap-4 max-w-[calc(100vw-2rem)]"
           >
-            <Undo2 className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Undo</span>
-          </button>
-        </div>
-      )}
+            <span className="text-[13px] font-medium truncate">
+              {undoToast.kind === 'delete'
+                ? `Removed ${undoToast.sub.name}`
+                : undoToast.message}
+            </span>
+            <Button variant="primary" size="sm" onClick={handleUndo}>
+              <Undo2 className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Undo</span>
+            </Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Sample Data Once-Only Prompt */}
-      {pendingDemoAction && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--vf-backdrop)] backdrop-blur-[2px] p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="demo-prompt-title"
-          data-testid="demo-mode-prompt"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setPendingDemoAction(null);
-          }}
-        >
-          <div className="w-full max-w-sm rounded-2xl bg-card border border-border p-5 shadow-xl space-y-4">
-            <div>
-              <h2 id="demo-prompt-title" className="text-base font-bold text-text-primary">
-                Remove the sample subscriptions first?
-              </h2>
-              <p className="mt-1 text-[13px] text-text-secondary">
-                Clear the sample items or keep them alongside yours.
-              </p>
-            </div>
-            <div className="flex items-center gap-2.5">
-              <button
-                type="button"
-                onClick={() => handleResolveDemoPrompt(true)}
-                className="flex-1 min-h-[44px] px-4 py-2 rounded-xl bg-brand hover:bg-brand-hover text-[15px] font-semibold text-white cursor-pointer transition-colors"
-              >
-                Remove
-              </button>
-              <button
-                type="button"
-                onClick={() => handleResolveDemoPrompt(false)}
-                className="flex-1 min-h-[44px] px-4 py-2 rounded-xl bg-subtle border border-border hover:border-brand text-[15px] font-semibold text-text-primary cursor-pointer transition-colors"
-              >
-                Keep both
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {pendingDemoAction && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.16 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--vf-backdrop)] backdrop-blur-[3px] p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="demo-prompt-title"
+            data-testid="demo-mode-prompt"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setPendingDemoAction(null);
+            }}
+          >
+            <motion.div
+              ref={demoDialogRef}
+              tabIndex={-1}
+              initial={{ opacity: 0, y: 10, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.97 }}
+              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              className="w-full max-w-sm rounded-2xl app-surface-elevated p-5 space-y-4"
+            >
+              <div>
+                <h2
+                  id="demo-prompt-title"
+                  className="font-display text-lg font-bold tracking-[-0.015em] text-text-primary"
+                >
+                  Remove the sample subscriptions first?
+                </h2>
+                <p className="mt-1.5 text-[13px] text-text-secondary leading-relaxed">
+                  Clear the sample items or keep them alongside yours.
+                </p>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={() => handleResolveDemoPrompt(true)}
+                  className="flex-1"
+                >
+                  Remove
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => handleResolveDemoPrompt(false)}
+                  className="flex-1"
+                >
+                  Keep both
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Modals */}
       <SubscriptionEditorModal
