@@ -1,8 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Archive, Check, Copy, ExternalLink, Mail, X } from 'lucide-react';
 import { formatShortDate } from '../../../core/utils/dateMath';
 import { formatMinorUnits } from '../../../core/utils/moneyFormatter';
 import { BILLING_CYCLES, type Subscription } from '../../cashflow/domain/subscription';
+import {
+  getCatalogEntryById,
+  matchCatalogByMerchant,
+} from '../../catalog/domain/serviceCatalog';
 import { generateActionScript } from '../domain/auditEngine';
 
 interface CancelKitModalProps {
@@ -18,6 +22,8 @@ export const CancelKitModal: React.FC<CancelKitModalProps> = ({
 }) => {
   const [mode, setMode] = useState<'cancel' | 'negotiate'>('cancel');
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const previewRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!subscription) return;
@@ -28,6 +34,7 @@ export const CancelKitModal: React.FC<CancelKitModalProps> = ({
         : 'cancel',
     );
     setCopied(false);
+    setCopyError(null);
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -43,39 +50,57 @@ export const CancelKitModal: React.FC<CancelKitModalProps> = ({
   const priceLabel = formatMinorUnits(subscription.amountMinorUnits, subscription.currency, {
     showDecimals: subscription.currency !== 'PKR',
   });
+  const catalogEntry =
+    (subscription.catalogId ? getCatalogEntryById(subscription.catalogId) : undefined) ??
+    matchCatalogByMerchant(subscription.name) ??
+    undefined;
+  const effectiveCancelUrl = subscription.cancelUrl ?? catalogEntry?.cancelUrl;
 
   const handleCopy = async () => {
+    setCopyError(null);
     try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('Clipboard API unavailable');
+      }
       await navigator.clipboard.writeText(fullEmail);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2200);
     } catch {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2200);
+      setCopied(false);
+      if (previewRef.current && typeof window !== 'undefined' && window.getSelection) {
+        const selection = window.getSelection();
+        if (selection) {
+          const range = document.createRange();
+          range.selectNodeContents(previewRef.current);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
+      }
+      setCopyError("Couldn't copy. Text is selected; press Ctrl+C or long-press to copy.");
     }
   };
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#17211E]/40 backdrop-blur-[2px] p-0 sm:p-4"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[var(--vf-backdrop)] backdrop-blur-[2px] p-0 sm:p-4"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="cancel-kit-title"
-      data-testid="cancel-kit-modal"
+      aria-labelledby="how-to-cancel-title"
+      data-testid="how-to-cancel-modal"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-lg max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-2xl bg-white border border-[#E4E7E1] p-5 sm:p-6 shadow-xl">
-        <div className="w-10 h-1 rounded-full bg-[#DCE1D9] mx-auto mb-4 sm:hidden" aria-hidden="true" />
+      <div className="w-full max-w-lg max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-card border border-border p-5 sm:p-6 shadow-xl">
+        <div className="w-10 h-1 rounded-full bg-border mx-auto mb-4 sm:hidden" aria-hidden="true" />
 
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold text-[#1E6B58]">Action Script Kit</p>
-            <h2 id="cancel-kit-title" className="mt-0.5 text-lg font-bold text-[#17211E]">
+            <p className="text-[13px] font-semibold text-brand-text">How to cancel</p>
+            <h2 id="how-to-cancel-title" className="mt-0.5 text-lg font-bold text-text-primary">
               {subscription.name}
             </h2>
-            <p className="mt-0.5 text-xs text-[#5B6662] font-mono tabular-nums">
+            <p className="mt-0.5 text-[13px] text-text-secondary tabular-nums">
               {priceLabel}
               {BILLING_CYCLES[subscription.cycle].shortSuffix} · Renews{' '}
               {formatShortDate(subscription.nextBillingDate)}
@@ -84,8 +109,8 @@ export const CancelKitModal: React.FC<CancelKitModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close cancel and negotiate kit"
-            className="min-h-[38px] min-w-[38px] rounded-xl bg-[#F5F6F3] border border-[#E4E7E1] text-[#5B6662] hover:text-[#17211E] flex items-center justify-center cursor-pointer"
+            aria-label="Close how to cancel helper"
+            className="min-h-[44px] min-w-[44px] rounded-xl bg-subtle border border-border text-text-secondary hover:text-text-primary flex items-center justify-center cursor-pointer"
           >
             <X className="w-4 h-4" aria-hidden="true" />
           </button>
@@ -93,9 +118,9 @@ export const CancelKitModal: React.FC<CancelKitModalProps> = ({
 
         {/* Mode Segmented Toggle */}
         <div
-          className="mt-4 grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-[#EEF1EC] border border-[#E4E7E1]"
+          className="mt-4 grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-subtle border border-border"
           role="tablist"
-          aria-label="Choose email script type"
+          aria-label="Choose email type"
         >
           <button
             type="button"
@@ -104,14 +129,15 @@ export const CancelKitModal: React.FC<CancelKitModalProps> = ({
             onClick={() => {
               setMode('cancel');
               setCopied(false);
+              setCopyError(null);
             }}
-            className={`min-h-[36px] rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+            className={`min-h-[40px] rounded-lg text-[13px] font-semibold transition-colors cursor-pointer ${
               mode === 'cancel'
-                ? 'bg-white text-[#17211E] shadow-xs'
-                : 'text-[#5B6662] hover:text-[#17211E]'
+                ? 'bg-card text-text-primary shadow-xs'
+                : 'text-text-secondary hover:text-text-primary'
             }`}
           >
-            Cancel Subscription
+            Cancel plan
           </button>
           <button
             type="button"
@@ -120,28 +146,42 @@ export const CancelKitModal: React.FC<CancelKitModalProps> = ({
             onClick={() => {
               setMode('negotiate');
               setCopied(false);
+              setCopyError(null);
             }}
-            className={`min-h-[36px] rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+            className={`min-h-[40px] rounded-lg text-[13px] font-semibold transition-colors cursor-pointer ${
               mode === 'negotiate'
-                ? 'bg-white text-[#17211E] shadow-xs'
-                : 'text-[#5B6662] hover:text-[#17211E]'
+                ? 'bg-card text-text-primary shadow-xs'
+                : 'text-text-secondary hover:text-text-primary'
             }`}
           >
-            Negotiate Lower Rate
+            Ask for a lower rate
           </button>
         </div>
 
         {/* Live Copyable Email Preview */}
-        <div className="mt-4 rounded-xl bg-[#F5F6F3] border border-[#E4E7E1] p-4 space-y-2.5">
-          <div className="flex items-center gap-2 pb-2 border-b border-[#E4E7E1] text-xs">
-            <Mail className="w-3.5 h-3.5 text-[#5B6662] shrink-0" aria-hidden="true" />
-            <span className="font-semibold text-[#5B6662]">Subject:</span>
-            <span className="font-medium text-[#17211E] truncate">{script.subject}</span>
+        <div
+          ref={previewRef}
+          className="mt-4 rounded-xl bg-subtle border border-border p-4 space-y-2.5 select-text"
+        >
+          <div className="flex items-center gap-2 pb-2 border-b border-border text-[13px]">
+            <Mail className="w-4 h-4 text-text-secondary shrink-0" aria-hidden="true" />
+            <span className="font-semibold text-text-secondary">Subject:</span>
+            <span className="font-medium text-text-primary truncate">{script.subject}</span>
           </div>
-          <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-[#2C3733]">
+          <pre className="whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-text-primary">
             {script.body}
           </pre>
         </div>
+
+        {copyError && (
+          <p
+            role="alert"
+            data-testid="copy-error-message"
+            className="mt-3 rounded-xl bg-amber-soft border border-amber-border px-3.5 py-2.5 text-[13px] font-medium text-amber-text"
+          >
+            {copyError}
+          </p>
+        )}
 
         {/* Primary & Secondary Actions */}
         <div className="mt-5 flex flex-wrap items-center gap-2.5">
@@ -149,46 +189,46 @@ export const CancelKitModal: React.FC<CancelKitModalProps> = ({
             type="button"
             onClick={handleCopy}
             data-testid="copy-action-script"
-            className="flex-1 min-h-[42px] px-4 py-2 rounded-xl bg-[#1E6B58] hover:bg-[#175747] text-xs font-semibold text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            className="flex-1 min-h-[44px] px-4 py-2 rounded-xl bg-brand hover:bg-brand-hover text-[15px] font-semibold text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
           >
             {copied ? (
               <>
                 <Check className="w-4 h-4" aria-hidden="true" />
-                <span>Copied to Clipboard</span>
+                <span>Copied</span>
               </>
             ) : (
               <>
                 <Copy className="w-4 h-4" aria-hidden="true" />
-                <span>Copy Email Script</span>
+                <span>Copy email</span>
               </>
             )}
           </button>
 
-          {subscription.cancelUrl && (
+          {effectiveCancelUrl && (
             <a
-              href={subscription.cancelUrl}
+              href={effectiveCancelUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="min-h-[42px] px-3.5 py-2 rounded-xl bg-[#F5F6F3] border border-[#E4E7E1] hover:border-[#1E6B58] text-xs font-semibold text-[#17211E] flex items-center gap-1.5 transition-colors"
+              className="min-h-[44px] px-3.5 py-2 rounded-xl bg-subtle border border-border hover:border-brand text-[13px] font-semibold text-text-primary flex items-center gap-1.5 transition-colors"
             >
-              <span>Billing Portal</span>
-              <ExternalLink className="w-3.5 h-3.5 text-[#5B6662]" aria-hidden="true" />
+              <span>Billing portal</span>
+              <ExternalLink className="w-3.5 h-3.5 text-text-secondary" aria-hidden="true" />
             </a>
           )}
         </div>
 
-        <div className="mt-3 pt-3 border-t border-[#E4E7E1] flex items-center justify-between gap-3">
-          <span className="text-xs text-[#5B6662]">Already cancelled with the provider?</span>
+        <div className="mt-3 pt-3 border-t border-border flex items-center justify-between gap-3">
+          <span className="text-[13px] text-text-secondary">Already cancelled it?</span>
           <button
             type="button"
             onClick={() => {
               onArchiveSubscription(subscription.id);
               onClose();
             }}
-            className="min-h-[34px] px-3 py-1 rounded-lg bg-[#FCEEEE] hover:bg-[#F8DFDF] text-xs font-semibold text-[#A63535] flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-subtle border border-border hover:border-brand text-[13px] font-semibold text-text-primary flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <Archive className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Archive Bill</span>
+            <Archive className="w-3.5 h-3.5 text-text-secondary" aria-hidden="true" />
+            <span>Mark as cancelled</span>
           </button>
         </div>
       </div>

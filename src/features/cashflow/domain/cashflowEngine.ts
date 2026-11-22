@@ -2,6 +2,7 @@ import { convertMinorUnits } from '../../../core/utils/currencyConverter';
 import { daysUntilRenewal, getTodayIso } from '../../../core/utils/dateMath';
 import {
   getAnnualMinorUnits,
+  getEffectiveExchangeRates,
   getMonthlyMinorUnits,
   type Subscription,
   type SubscriptionCategory,
@@ -34,6 +35,7 @@ export interface CashflowSummary {
   readonly simulatedAnnualSavingsBaseMinorUnits: number;
   readonly simulatedCount: number;
   readonly activeTrialCount: number;
+  readonly expiredTrials: readonly ComputedSubscription[];
   readonly dueSoonCount: number;
   readonly budgetUsageRatio: number;
 }
@@ -45,24 +47,29 @@ export function computeSubscriptionMetrics(
 ): ComputedSubscription {
   const ownMonthly = getMonthlyMinorUnits(sub.amountMinorUnits, sub.cycle);
   const ownAnnual = getAnnualMinorUnits(sub.amountMinorUnits, sub.cycle);
+  const rates = getEffectiveExchangeRates(settings);
+  const markup = settings.cardMarkupPercent ?? 0;
 
   const baseMonthlyMinorUnits = convertMinorUnits(
     ownMonthly,
     sub.currency,
     settings.baseCurrency,
-    settings.exchangeRatesPerUsd,
+    rates,
+    markup,
   );
   const baseAnnualMinorUnits = convertMinorUnits(
     ownAnnual,
     sub.currency,
     settings.baseCurrency,
-    settings.exchangeRatesPerUsd,
+    rates,
+    markup,
   );
   const baseCycleMinorUnits = convertMinorUnits(
     sub.amountMinorUnits,
     sub.currency,
     settings.baseCurrency,
-    settings.exchangeRatesPerUsd,
+    rates,
+    markup,
   );
 
   return {
@@ -96,6 +103,7 @@ export function computeCashflowSummary(
   let simulatedCount = 0;
   let activeTrialCount = 0;
   let dueSoonCount = 0;
+  const expiredTrials: ComputedSubscription[] = [];
 
   const categoryTotals = new Map<SubscriptionCategory, { amount: number; count: number }>();
 
@@ -109,8 +117,13 @@ export function computeCashflowSummary(
 
     activeMonthlyBaseMinorUnits += item.baseMonthlyMinorUnits;
     activeAnnualBaseMinorUnits += item.baseAnnualMinorUnits;
-    if (sub.isFreeTrial) activeTrialCount += 1;
-    if (item.daysUntilRenewal <= 3) dueSoonCount += 1;
+    if (sub.isFreeTrial) {
+      activeTrialCount += 1;
+      if (item.daysUntilRenewal < 0) {
+        expiredTrials.push(item);
+      }
+    }
+    if (item.daysUntilRenewal >= 0 && item.daysUntilRenewal <= 3) dueSoonCount += 1;
 
     const displayedForDial = options.showAnnual
       ? item.baseAnnualMinorUnits
@@ -121,6 +134,13 @@ export function computeCashflowSummary(
       count: prev.count + 1,
     });
   }
+
+  expiredTrials.sort((a, b) => {
+    if (a.daysUntilRenewal !== b.daysUntilRenewal) {
+      return a.daysUntilRenewal - b.daysUntilRenewal;
+    }
+    return a.subscription.name.localeCompare(b.subscription.name);
+  });
 
   const displayedTotalBaseMinorUnits = options.showAnnual
     ? activeAnnualBaseMinorUnits
@@ -173,6 +193,7 @@ export function computeCashflowSummary(
     simulatedAnnualSavingsBaseMinorUnits,
     simulatedCount,
     activeTrialCount,
+    expiredTrials,
     dueSoonCount,
     budgetUsageRatio,
   };

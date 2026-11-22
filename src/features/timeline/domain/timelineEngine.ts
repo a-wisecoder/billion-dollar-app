@@ -4,7 +4,11 @@ import {
   projectBillingDatesInMonth,
   toIsoDate,
 } from '../../../core/utils/dateMath';
-import type { Subscription, VaultSettings } from '../../cashflow/domain/subscription';
+import {
+  getEffectiveExchangeRates,
+  type Subscription,
+  type VaultSettings,
+} from '../../cashflow/domain/subscription';
 
 export interface ProjectedCharge {
   readonly dateIso: string;
@@ -53,17 +57,28 @@ export function computeMonthTimeline(
     chargesByDay.set(d, []);
   }
 
+  const rates = getEffectiveExchangeRates(settings);
+  const markup = settings.cardMarkupPercent ?? 0;
+
   let totalMonthBaseMinorUnits = 0;
   let totalChargesCount = 0;
 
   for (const sub of subscriptions) {
     if (sub.isArchived || sub.isSimulatedPaused) continue;
-    const dates = projectBillingDatesInMonth(sub.nextBillingDate, sub.cycle, year, month);
+    const dates = projectBillingDatesInMonth(
+      sub.nextBillingDate,
+      sub.cycle,
+      year,
+      month,
+      sub.billingDay,
+      sub.startDate,
+    );
     const baseAmountMinorUnits = convertMinorUnits(
       sub.amountMinorUnits,
       sub.currency,
       settings.baseCurrency,
-      settings.exchangeRatesPerUsd,
+      rates,
+      markup,
     );
 
     for (const dateIso of dates) {

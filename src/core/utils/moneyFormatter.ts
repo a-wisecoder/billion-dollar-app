@@ -5,21 +5,61 @@ export interface FormatMoneyOptions {
   readonly compactWhole?: boolean;
 }
 
-function addThousandsSeparators(digits: string): string {
-  let out = '';
-  for (let i = 0; i < digits.length; i++) {
-    const posFromRight = digits.length - i;
-    out += digits[i];
-    if (posFromRight > 1 && posFromRight % 3 === 1) {
-      out += ',';
-    }
+const symbolCache = new Map<CurrencyCode, string>();
+const integerFormatter = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 0,
+  useGrouping: true,
+});
+
+/**
+ * Resolves currency display symbol via Intl.NumberFormat while keeping familiar
+ * short prefixes (like "Rs " for PKR) and readable spacing after letter codes.
+ */
+export function getCurrencySymbol(currency: CurrencyCode): string {
+  const cached = symbolCache.get(currency);
+  if (cached) return cached;
+
+  // Preserve familiar local prefix for PKR and currencies where Intl prints bare ISO code without space
+  if (currency === 'PKR') {
+    symbolCache.set(currency, 'Rs ');
+    return 'Rs ';
   }
-  return out;
+
+  let resolved = CURRENCIES[currency]?.symbol ?? `${currency} `;
+  try {
+    const parts = new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).formatToParts(0);
+    const currencyPart = parts.find((p) => p.type === 'currency')?.value;
+    if (currencyPart) {
+      // Distinguish non-US dollar codes when narrowSymbol collapses them to bare "$"
+      if (currencyPart === '$' && currency !== 'USD') {
+        resolved = CURRENCIES[currency].symbol;
+      } else if (/^[A-Za-z.]+$/.test(currencyPart)) {
+        resolved = `${currencyPart} `;
+      } else {
+        resolved = currencyPart;
+      }
+    }
+  } catch {
+    resolved = CURRENCIES[currency]?.symbol ?? `${currency} `;
+  }
+
+  symbolCache.set(currency, resolved);
+  return resolved;
+}
+
+function formatWholeInteger(whole: number): string {
+  return integerFormatter.format(whole);
 }
 
 /**
- * Formats integer minor units (e.g., 1499 -> "$14.99") with thousands separators.
- * Never performs floating-point arithmetic on currency values.
+ * Formats integer minor units (e.g., 1499 -> "$14.99") using Intl.NumberFormat
+ * for symbols and grouping separators while keeping strict integer minor-unit math.
  */
 export function formatMinorUnits(
   minorUnits: number,
@@ -29,21 +69,21 @@ export function formatMinorUnits(
   const safeInt = Math.trunc(minorUnits);
   const isNegative = safeInt < 0;
   const abs = Math.abs(safeInt);
-  const whole = Math.floor(abs / 100);
-  const fraction = abs % 100;
-  const symbol = CURRENCIES[currency].symbol;
-  const sign = isNegative ? '-' : '';
-  const wholeStr = addThousandsSeparators(String(whole));
+  const symbol = getCurrencySymbol(currency);
 
-  // For PKR, omit .00 decimals by default when compactWhole is requested or whole is large
-  const hideDecimals =
-    options.showDecimals === false ||
-    (options.compactWhole === true && fraction === 0);
-
-  if (hideDecimals && fraction === 0) {
+  if (options.showDecimals === false) {
+    const roundedWhole = Math.floor((abs + 50) / 100);
+    const sign = isNegative && roundedWhole > 0 ? '-' : '';
+    const wholeStr = formatWholeInteger(roundedWhole);
     return `${sign}${symbol}${wholeStr}`;
   }
-  if (options.showDecimals === false) {
+
+  const whole = Math.floor(abs / 100);
+  const fraction = abs % 100;
+  const sign = isNegative ? '-' : '';
+  const wholeStr = formatWholeInteger(whole);
+
+  if (options.compactWhole === true && fraction === 0) {
     return `${sign}${symbol}${wholeStr}`;
   }
 
@@ -80,4 +120,36 @@ export function minorUnitsToInputString(minorUnits: number): string {
   const frac = abs % 100;
   if (frac === 0) return String(whole);
   return `${whole}.${String(frac).padStart(2, '0')}`;
+}
+
+/**
+ * Formats integer minor units into a compact label for tight cells (e.g. "$38", "Rs 5.8k").
+ * Uses integer half-up rounding with no floating-point currency accumulation.
+ */
+export function formatCompactMinorUnits(
+  minorUnits: number,
+  currency: CurrencyCode = 'USD',
+): string {
+  const safeInt = Math.trunc(minorUnits);
+  const isNegative = safeInt < 0;
+  const abs = Math.abs(safeInt);
+  const symbol = getCurrencySymbol(currency);
+  const roundedWhole = Math.floor((abs + 50) / 100);
+  const sign = isNegative && roundedWhole > 0 ? '-' : '';
+
+  if (roundedWhole >= 1_000_000) {
+    const tenthsMillions = Math.floor((roundedWhole + 50_000) / 100_000);
+    const major = Math.floor(tenthsMillions / 10);
+    const decimal = tenthsMillions % 10;
+    return `${sign}${symbol}${decimal === 0 ? String(major) : `${major}.${decimal}`}M`;
+  }
+
+  if (roundedWhole >= 1_000) {
+    const tenthsThousands = Math.floor((roundedWhole + 50) / 100);
+    const major = Math.floor(tenthsThousands / 10);
+    const decimal = tenthsThousands % 10;
+    return `${sign}${symbol}${decimal === 0 ? String(major) : `${major}.${decimal}`}k`;
+  }
+
+  return `${sign}${symbol}${roundedWhole}`;
 }

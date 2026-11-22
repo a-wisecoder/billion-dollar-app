@@ -23,6 +23,7 @@ import {
   type Subscription,
 } from '../../../features/cashflow/domain/subscription';
 import { computeCashflowSummary } from '../../../features/cashflow/domain/cashflowEngine';
+import { normalizeOverdueSubscriptions } from '../../../features/cashflow/data/localStorageRepository';
 import { computeMonthTimeline } from '../../../features/timeline/domain/timelineEngine';
 
 test('parseDecimalToMinorUnits converts decimal strings strictly without float drift', () => {
@@ -45,6 +46,16 @@ test('formatMinorUnits formats thousands separators and currencies accurately', 
   assert.equal(formatMinorUnits(20000, 'USD', { showDecimals: false }), '$200');
   assert.equal(formatMinorUnits(556000, 'PKR', { showDecimals: false }), 'Rs 5,560');
   assert.equal(formatMinorUnits(-500, 'EUR'), '-€5.00');
+});
+
+test('formatMinorUnits rounds half-up when decimals are hidden', () => {
+  assert.equal(formatMinorUnits(181788, 'USD', { showDecimals: false }), '$1,818');
+  assert.equal(formatMinorUnits(4851, 'USD', { showDecimals: false }), '$49');
+  assert.equal(formatMinorUnits(21588, 'USD', { showDecimals: false }), '$216');
+  assert.equal(formatMinorUnits(149, 'USD', { showDecimals: false }), '$1');
+  assert.equal(formatMinorUnits(150, 'USD', { showDecimals: false }), '$2');
+  assert.equal(formatMinorUnits(-4851, 'USD', { showDecimals: false }), '-$49');
+  assert.equal(formatMinorUnits(-49, 'USD', { showDecimals: false }), '$0');
 });
 
 test('convertMinorUnits normalizes multi-currency amounts accurately', () => {
@@ -113,6 +124,90 @@ test('projectBillingDatesInMonth projects weekly, monthly, quarterly, and yearly
   );
 });
 
+test('billingDay prevents month-end drift across short months on reload and projection', () => {
+  let subs: Subscription[] = [
+    {
+      id: 'sub_31',
+      name: 'Month-End Plan',
+      amountMinorUnits: 1500,
+      currency: 'USD',
+      cycle: 'monthly',
+      category: 'productivity',
+      nextBillingDate: '2027-01-31',
+      billingDay: 31,
+      isFreeTrial: false,
+      isSimulatedPaused: false,
+      isArchived: false,
+      notes: '',
+    },
+  ];
+
+  // Open on 2027-02-01, save result -> 2027-02-28 (billingDay stays 31)
+  subs = normalizeOverdueSubscriptions(subs, '2027-02-01');
+  assert.equal(subs[0].nextBillingDate, '2027-02-28');
+  assert.equal(subs[0].billingDay, 31);
+
+  // Open on 2027-03-01, save result -> 2027-03-31 (no drift to 28!)
+  subs = normalizeOverdueSubscriptions(subs, '2027-03-01');
+  assert.equal(subs[0].nextBillingDate, '2027-03-31');
+  assert.equal(subs[0].billingDay, 31);
+
+  // Open on 2027-04-01, save result -> 2027-04-30
+  subs = normalizeOverdueSubscriptions(subs, '2027-04-01');
+  assert.equal(subs[0].nextBillingDate, '2027-04-30');
+  assert.equal(subs[0].billingDay, 31);
+
+  // December projection for billingDay 31 even when stored date is Nov 30 -> 2026-12-31
+  assert.deepEqual(
+    projectBillingDatesInMonth('2026-11-30', 'monthly', 2026, 12, 31),
+    ['2026-12-31'],
+  );
+
+  // Calendar timeline projection across Nov, Dec, and Feb preserves billingDay 31
+  const settings = createDefaultSettings();
+  const anchoredSub: Subscription = {
+    ...subs[0],
+    nextBillingDate: '2026-11-30',
+    billingDay: 31,
+  };
+  const nov = computeMonthTimeline([anchoredSub], settings, 2026, 11);
+  const dec = computeMonthTimeline([anchoredSub], settings, 2026, 12);
+  const feb = computeMonthTimeline([anchoredSub], settings, 2027, 2);
+  assert.deepEqual(
+    nov.days.filter((d) => d.charges.length > 0).map((d) => d.dateIso),
+    ['2026-11-30'],
+  );
+  assert.deepEqual(
+    dec.days.filter((d) => d.charges.length > 0).map((d) => d.dateIso),
+    ['2026-12-31'],
+  );
+  assert.deepEqual(
+    feb.days.filter((d) => d.charges.length > 0).map((d) => d.dateIso),
+    ['2027-02-28'],
+  );
+
+  // Legacy data without billingDay backfills billingDay from stored nextBillingDate
+  const legacy = normalizeOverdueSubscriptions(
+    [
+      {
+        id: 'legacy_1',
+        name: 'Legacy Plan',
+        amountMinorUnits: 1000,
+        currency: 'USD',
+        cycle: 'monthly',
+        category: 'utilities',
+        nextBillingDate: '2027-05-19',
+        isFreeTrial: false,
+        isSimulatedPaused: false,
+        isArchived: false,
+        notes: '',
+      },
+    ],
+    '2027-05-01',
+  );
+  assert.equal(legacy[0].billingDay, 19);
+});
+
 test('cashflowEngine computes burn segments and What-If annual savings accurately', () => {
   const settings = createDefaultSettings();
   const subs: Subscription[] = [
@@ -157,6 +252,51 @@ test('cashflowEngine computes burn segments and What-If annual savings accuratel
   assert.equal(summary.dialSegments.length, 1);
   assert.equal(summary.dialSegments[0].category, 'aiAndCloud');
   assert.equal(summary.dialSegments[0].fraction, 1);
+});
+
+test('cashflowEngine excludes expired free trials from dueSoonCount and surfaces them in expiredTrials', () => {
+  const settings = createDefaultSettings();
+  const subs: Subscription[] = [
+    {
+      id: 'trial_expired',
+      name: 'Old Trial',
+      amountMinorUnits: 2000,
+      currency: 'USD',
+      cycle: 'monthly',
+      category: 'aiAndCloud',
+      nextBillingDate: '2026-11-15',
+      billingDay: 15,
+      isFreeTrial: true,
+      isSimulatedPaused: false,
+      isArchived: false,
+      notes: '',
+    },
+    {
+      id: 'trial_due_soon',
+      name: 'Active Trial',
+      amountMinorUnits: 1200,
+      currency: 'USD',
+      cycle: 'monthly',
+      category: 'streaming',
+      nextBillingDate: '2026-11-22',
+      billingDay: 22,
+      isFreeTrial: true,
+      isSimulatedPaused: false,
+      isArchived: false,
+      notes: '',
+    },
+  ];
+
+  const summary = computeCashflowSummary(subs, settings, {
+    selectedCategory: null,
+    showAnnual: false,
+    searchQuery: '',
+    todayIso: '2026-11-20',
+  });
+
+  assert.equal(summary.dueSoonCount, 1);
+  assert.equal(summary.expiredTrials.length, 1);
+  assert.equal(summary.expiredTrials[0].subscription.id, 'trial_expired');
 });
 
 test('timelineEngine detects Heavy-Week Cluster when > 40% spend falls in 7 days', () => {
@@ -269,4 +409,33 @@ test('backupService exports and round-trips valid backups and rejects malformed 
     }),
   );
   assert.equal(floatAmount.ok, false);
+
+  // Backwards compatibility: accepts backup without billingDay or isDemo
+  const legacyBackup = parseVaultBackup(
+    JSON.stringify({
+      schemaVersion: 1,
+      settings: {
+        baseCurrency: 'USD',
+        monthlyCeilingMinorUnits: 20000,
+        notificationsEnabled: true,
+        reminderLeadDays: 2,
+      },
+      subscriptions: [
+        {
+          id: 'legacy_sub',
+          name: 'Legacy Bill',
+          amountMinorUnits: 1200,
+          currency: 'USD',
+          cycle: 'monthly',
+          category: 'utilities',
+          nextBillingDate: '2026-11-30',
+        },
+      ],
+    }),
+  );
+  assert.equal(legacyBackup.ok, true);
+  if (legacyBackup.ok) {
+    assert.equal(legacyBackup.data.subscriptions[0].billingDay, 30);
+    assert.equal(legacyBackup.data.settings.isDemo, false);
+  }
 });

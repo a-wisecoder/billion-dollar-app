@@ -1,6 +1,5 @@
 import { convertMinorUnits } from '../../../core/utils/currencyConverter';
 import {
-  addDaysIso,
   daysUntilRenewal,
   formatMonthYear,
   formatShortDate,
@@ -8,15 +7,15 @@ import {
   parseIsoDate,
   projectBillingDatesInMonth,
 } from '../../../core/utils/dateMath';
-import { formatMinorUnits, parseDecimalToMinorUnits } from '../../../core/utils/moneyFormatter';
+import { formatMinorUnits } from '../../../core/utils/moneyFormatter';
 import {
   BILLING_CYCLES,
   CATEGORIES,
   USAGE_FREQUENCY_META,
+  ZERO_DECIMAL_DISPLAY_CURRENCIES,
   getAnnualMinorUnits,
+  getEffectiveExchangeRates,
   getMonthlyMinorUnits,
-  type BillingCycle,
-  type CurrencyCode,
   type Subscription,
   type SubscriptionCategory,
   type VaultSettings,
@@ -42,6 +41,7 @@ export interface LeakAuditReport {
   readonly annualPriceHikeCreepMinorUnits: number;
   readonly lowValueSubscriptions: readonly Subscription[];
   readonly annualLowValueSavingsMinorUnits: number;
+  readonly uniqueFlaggedCount: number;
   readonly overlapGroups: readonly CategoryOverlapGroup[];
   readonly totalReclaimableAnnualMinorUnits: number;
   /** Future value if reclaimable monthly cash is invested at 7% APR compounded monthly for 5 years */
@@ -65,26 +65,6 @@ export interface MonthlyForecastBar {
     readonly baseAmountMinorUnits: number;
   }[];
 }
-
-export interface ParsedStatementCandidate {
-  readonly tempId: string;
-  readonly rawLine: string;
-  readonly name: string;
-  readonly amountMinorUnits: number;
-  readonly currency: CurrencyCode;
-  readonly cycle: BillingCycle;
-  readonly category: SubscriptionCategory;
-  readonly nextBillingDate: string;
-  readonly matchedExistingId: string | null;
-  readonly detectedPriceHikeMinorUnits: number;
-}
-
-export const SAMPLE_BANK_STATEMENT = `2026-11-18 | SPOTIFY USA PREMIUM | $11.99
-2026-11-19 | CHATGPT PLUS OPENAI | $20.00
-2026-11-20 | ICLOUD+ 2TB STORAGE | $9.99
-2026-11-21 | YOUTUBE PREMIUM FAMILY | $22.99
-2026-11-22 | NOTION PLUS WORKSPACE | $10.00
-2026-11-24 | EQUINOX FITNESS CLUB | $85.00`;
 
 const SHORT_MONTHS = [
   'Jan',
@@ -125,11 +105,14 @@ export function computeCostPerUseMinorUnits(
   const uses = USAGE_FREQUENCY_META[freq].monthlyUses;
   if (uses <= 0) return null;
   const monthlyOwn = getMonthlyMinorUnits(sub.amountMinorUnits, sub.cycle);
+  const rates = getEffectiveExchangeRates(settings);
+  const markup = settings.cardMarkupPercent ?? 0;
   const monthlyBase = convertMinorUnits(
     monthlyOwn,
     sub.currency,
     settings.baseCurrency,
-    settings.exchangeRatesPerUsd,
+    rates,
+    markup,
   );
   return Math.round(monthlyBase / uses);
 }
@@ -141,6 +124,8 @@ export function computeLeakAudit(
   todayIso: string = getTodayIso(),
 ): LeakAuditReport {
   const active = subscriptions.filter((s) => !s.isArchived && !s.isSimulatedPaused);
+  const rates = getEffectiveExchangeRates(settings);
+  const markup = settings.cardMarkupPercent ?? 0;
 
   const priceHikes: PriceHikeItem[] = [];
   let annualPriceHikeCreepMinorUnits = 0;
@@ -160,13 +145,15 @@ export function computeLeakAudit(
       monthlyOwn,
       sub.currency,
       settings.baseCurrency,
-      settings.exchangeRatesPerUsd,
+      rates,
+      markup,
     );
     const annualBase = convertMinorUnits(
       annualOwn,
       sub.currency,
       settings.baseCurrency,
-      settings.exchangeRatesPerUsd,
+      rates,
+      markup,
     );
 
     // 1. Price hike detection
@@ -181,13 +168,15 @@ export function computeLeakAudit(
         prevMonthlyOwn,
         sub.currency,
         settings.baseCurrency,
-        settings.exchangeRatesPerUsd,
+        rates,
+        markup,
       );
       const prevAnnualBase = convertMinorUnits(
         prevAnnualOwn,
         sub.currency,
         settings.baseCurrency,
-        settings.exchangeRatesPerUsd,
+        rates,
+        markup,
       );
       const deltaMonthly = Math.max(0, monthlyBase - prevMonthlyBase);
       const deltaAnnual = Math.max(0, annualBase - prevAnnualBase);
@@ -223,7 +212,8 @@ export function computeLeakAudit(
         sub.amountMinorUnits,
         sub.currency,
         settings.baseCurrency,
-        settings.exchangeRatesPerUsd,
+        rates,
+        markup,
       );
       next14DaysDueMinorUnits += dueAmountBase;
       next14DaysCount += 1;
@@ -237,7 +227,7 @@ export function computeLeakAudit(
         const m = getMonthlyMinorUnits(sub.amountMinorUnits, sub.cycle);
         return (
           acc +
-          convertMinorUnits(m, sub.currency, settings.baseCurrency, settings.exchangeRatesPerUsd)
+          convertMinorUnits(m, sub.currency, settings.baseCurrency, rates, markup)
         );
       }, 0);
       overlapGroups.push({
@@ -265,11 +255,17 @@ export function computeLeakAudit(
     Math.round(totalReclaimableAnnualMinorUnits / 12),
   );
 
+  const uniqueFlaggedIds = new Set<string>([
+    ...priceHikes.map((h) => h.subscription.id),
+    ...lowValueSubscriptions.map((s) => s.id),
+  ]);
+
   return {
     priceHikes,
     annualPriceHikeCreepMinorUnits,
     lowValueSubscriptions,
     annualLowValueSavingsMinorUnits,
+    uniqueFlaggedCount: uniqueFlaggedIds.size,
     overlapGroups,
     totalReclaimableAnnualMinorUnits,
     fiveYearInvestedValueMinorUnits,
@@ -286,6 +282,8 @@ export function compute12MonthForecast(
 ): MonthlyForecastBar[] {
   const parsed = parseIsoDate(todayIso) ?? { year: 2026, month: 11, day: 20 };
   const active = subscriptions.filter((s) => !s.isArchived && !s.isSimulatedPaused);
+  const rates = getEffectiveExchangeRates(settings);
+  const markup = settings.cardMarkupPercent ?? 0;
 
   const rawMonths: Omit<MonthlyForecastBar, 'isSpike'>[] = [];
 
@@ -302,13 +300,21 @@ export function compute12MonthForecast(
     let total = 0;
 
     for (const sub of active) {
-      const dates = projectBillingDatesInMonth(sub.nextBillingDate, sub.cycle, year, month);
+      const dates = projectBillingDatesInMonth(
+        sub.nextBillingDate,
+        sub.cycle,
+        year,
+        month,
+        sub.billingDay,
+        sub.startDate,
+      );
       for (const dateIso of dates) {
         const baseAmt = convertMinorUnits(
           sub.amountMinorUnits,
           sub.currency,
           settings.baseCurrency,
-          settings.exchangeRatesPerUsd,
+          rates,
+          markup,
         );
         total += baseAmt;
         charges.push({
@@ -341,140 +347,13 @@ export function compute12MonthForecast(
   }));
 }
 
-function inferCategoryFromMerchant(name: string): SubscriptionCategory {
-  const lower = name.toLowerCase();
-  if (
-    /spotify|netflix|hulu|disney|youtube|hbo|cinema|apple tv|music|audible|prime video/.test(
-      lower,
-    )
-  ) {
-    return 'streaming';
-  }
-  if (/chatgpt|openai|claude|anthropic|aws|icloud|cloud|vercel|github|cursor|gpu|dropbox/.test(lower)) {
-    return 'aiAndCloud';
-  }
-  if (/gym|equinox|fitness|peloton|strava|whoop|health|club|yoga|planet fitness/.test(lower)) {
-    return 'health';
-  }
-  if (/fiber|internet|att|verizon|t-mobile|electric|water|utility|broadband|comcast|xfinity/.test(lower)) {
-    return 'utilities';
-  }
-  return 'productivity';
-}
-
-function detectCurrency(line: string): CurrencyCode {
-  if (/€|\bEUR\b/i.test(line)) return 'EUR';
-  if (/£|\bGBP\b/i.test(line)) return 'GBP';
-  if (/\bPKR\b|\bRs\.?\s?\d/i.test(line)) return 'PKR';
-  if (/\bAED\b/i.test(line)) return 'AED';
-  return 'USD';
-}
-
-const BRAND_CASING: Record<string, string> = {
-  chatgpt: 'ChatGPT',
-  openai: 'OpenAI',
-  icloud: 'iCloud',
-  'icloud+': 'iCloud+',
-  youtube: 'YouTube',
-  github: 'GitHub',
-  aws: 'AWS',
-  usa: 'USA',
-  '2tb': '2TB',
-  '1tb': '1TB',
-  '4k': '4K',
-  ai: 'AI',
-  pro: 'Pro',
-};
-
-function cleanMerchantName(raw: string): string {
-  return raw
-    .replace(/\b\d{4}-\d{2}-\d{2}\b/g, ' ')
-    .replace(/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g, ' ')
-    .replace(/(?:USD|EUR|GBP|PKR|AED|Rs\.?)/gi, ' ')
-    .replace(/[$€£]\s*[\d,]+(?:\.\d{1,2})?/g, ' ')
-    .replace(/\b[\d,]+\.\d{2}\b/g, ' ')
-    .replace(/[|,\-–—]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .filter(Boolean)
-    .map((word) => {
-      const lower = word.toLowerCase();
-      if (BRAND_CASING[lower]) return BRAND_CASING[lower];
-      return word.length <= 3 && word === word.toUpperCase()
-        ? word
-        : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-    })
-    .join(' ');
-}
-
-/**
- * Deterministic Smart Bank Statement / Card SMS / CSV parser.
- * Extracts recurring merchant charges locally with zero cloud uploads.
- */
-export function parseStatementText(
-  rawText: string,
-  existingSubscriptions: readonly Subscription[],
-  todayIso: string = getTodayIso(),
-): ParsedStatementCandidate[] {
-  const lines = rawText
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length >= 4);
-
-  const results: ParsedStatementCandidate[] = [];
-
-  lines.forEach((line, index) => {
-    const amountMatch =
-      line.match(/(?:[$€£]|USD|EUR|GBP|PKR|AED|Rs\.?)\s*([\d,]+(?:\.\d{1,2})?)/i) ??
-      line.match(/\b([\d,]+\.\d{2})\b/);
-
-    if (!amountMatch) return;
-    const amountMinorUnits = parseDecimalToMinorUnits(amountMatch[1]);
-    if (amountMinorUnits === null || amountMinorUnits <= 0) return;
-
-    const currency = detectCurrency(line);
-    const cleanedName = cleanMerchantName(line);
-    if (!cleanedName || cleanedName.length < 2) return;
-
-    const lowerClean = cleanedName.toLowerCase();
-    const matched = existingSubscriptions.find((sub) => {
-      const subLower = sub.name.toLowerCase();
-      return subLower.includes(lowerClean) || lowerClean.includes(subLower);
-    });
-
-    const detectedHike =
-      matched && matched.currency === currency && amountMinorUnits > matched.amountMinorUnits
-        ? amountMinorUnits - matched.amountMinorUnits
-        : 0;
-
-    const isAnnualHint = /\b(annual|yearly|\/yr)\b/i.test(line);
-    const cycle: BillingCycle = isAnnualHint ? 'yearly' : 'monthly';
-
-    results.push({
-      tempId: `import_${index}_${cleanedName.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
-      rawLine: line,
-      name: cleanedName,
-      amountMinorUnits,
-      currency,
-      cycle,
-      category: inferCategoryFromMerchant(cleanedName),
-      nextBillingDate: addDaysIso(todayIso, 14 + (index % 15)),
-      matchedExistingId: matched?.id ?? null,
-      detectedPriceHikeMinorUnits: detectedHike,
-    });
-  });
-
-  return results;
-}
-
 /** Generates a tailored, copy-ready Cancellation or Retention-Discount Negotiation message. */
 export function generateActionScript(
   sub: Subscription,
   mode: 'cancel' | 'negotiate',
 ): { readonly subject: string; readonly body: string } {
   const priceStr = formatMinorUnits(sub.amountMinorUnits, sub.currency, {
-    showDecimals: sub.currency !== 'PKR',
+    showDecimals: !ZERO_DECIMAL_DISPLAY_CURRENCIES.has(sub.currency),
   });
   const cycleStr = BILLING_CYCLES[sub.cycle].label.toLowerCase();
   const renewStr = formatShortDate(sub.nextBillingDate);

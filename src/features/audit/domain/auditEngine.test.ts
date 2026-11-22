@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createDefaultSettings, type Subscription } from '../../cashflow/domain/subscription';
+import { computeMonthTimeline } from '../../timeline/domain/timelineEngine';
 import {
-  SAMPLE_BANK_STATEMENT,
   compute12MonthForecast,
   computeCostPerUseMinorUnits,
   computeFiveYearCompoundValue,
   computeLeakAudit,
   generateActionScript,
-  parseStatementText,
 } from './auditEngine';
 
 const FIXED_TODAY = '2026-11-20';
@@ -86,6 +85,8 @@ test('computeLeakAudit detects price hikes, unused bills, overlaps, and 14-day b
   assert.equal(report.annualPriceHikeCreepMinorUnits, 9600);
   assert.equal(report.lowValueSubscriptions.length, 1);
   assert.equal(report.lowValueSubscriptions[0].id, 's2');
+  // s2 is both a price hike and unused, so uniqueFlaggedCount must be 2 (s1 + s2), not 3
+  assert.equal(report.uniqueFlaggedCount, 2);
   // Reclaimable = unused full annual ($18*12 = $216) + kept hike creep ($5*12 = $60) = $276 (27600 cents)
   assert.equal(report.totalReclaimableAnnualMinorUnits, 27600);
   assert.ok(report.fiveYearInvestedValueMinorUnits > 27600 * 5);
@@ -95,25 +96,6 @@ test('computeLeakAudit detects price hikes, unused bills, overlaps, and 14-day b
   // 14-day checking buffer: s1 ($45) + s2 ($18) = $63 (6300 cents); s3 is 25 days away
   assert.equal(report.next14DaysCount, 2);
   assert.equal(report.next14DaysDueMinorUnits, 6300);
-});
-
-test('parseStatementText extracts merchants, amounts, categories, and detects price hikes against existing bills', () => {
-  const existing: Subscription[] = [
-    makeSub({ id: 'ex_1', name: 'ChatGPT Plus', amountMinorUnits: 1800, currency: 'USD' }),
-  ];
-
-  const parsed = parseStatementText(SAMPLE_BANK_STATEMENT, existing, FIXED_TODAY);
-  assert.equal(parsed.length, 6);
-
-  const spotify = parsed.find((p) => p.name.toLowerCase().includes('spotify'));
-  assert.ok(spotify);
-  assert.equal(spotify.amountMinorUnits, 1199);
-  assert.equal(spotify.category, 'streaming');
-
-  const chatgpt = parsed.find((p) => p.name.toLowerCase().includes('chatgpt'));
-  assert.ok(chatgpt);
-  assert.equal(chatgpt.matchedExistingId, 'ex_1');
-  assert.equal(chatgpt.detectedPriceHikeMinorUnits, 200);
 });
 
 test('compute12MonthForecast projects 12 rolling months and flags annual spike month', () => {
@@ -139,6 +121,36 @@ test('compute12MonthForecast projects 12 rolling months and flags annual spike m
   assert.ok(march);
   assert.equal(march.isSpike, true);
   assert.equal(march.totalBaseMinorUnits, 25000);
+});
+
+test('projections never create charges before startDate', () => {
+  const settings = createDefaultSettings();
+  const sub = makeSub({
+    id: 'start_guard',
+    name: 'Netflix',
+    amountMinorUnits: 1549,
+    cycle: 'monthly',
+    nextBillingDate: '2026-11-05',
+    billingDay: 5,
+    startDate: '2026-10-05',
+  });
+
+  // September 2026 is before startDate 2026-10-05 -> zero charges
+  const sept = computeMonthTimeline([sub], settings, 2026, 9);
+  assert.equal(sept.totalChargesCount, 0);
+  assert.equal(sept.totalMonthBaseMinorUnits, 0);
+
+  // October 2026 (on startDate 2026-10-05) -> 1 charge
+  const oct = computeMonthTimeline([sub], settings, 2026, 10);
+  assert.equal(oct.totalChargesCount, 1);
+  assert.equal(oct.totalMonthBaseMinorUnits, 1549);
+
+  // Forecast starting in September 2026 also shows 0 in September and 1549 in October
+  const forecast = compute12MonthForecast([sub], settings, '2026-09-01');
+  assert.equal(forecast[0].month, 9);
+  assert.equal(forecast[0].chargeCount, 0);
+  assert.equal(forecast[1].month, 10);
+  assert.equal(forecast[1].chargeCount, 1);
 });
 
 test('generateActionScript produces tailored cancel and negotiate templates', () => {

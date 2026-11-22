@@ -1,7 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Check,
+  ChevronDown,
+  ChevronUp,
   FileSpreadsheet,
   Layers,
   Mail,
@@ -9,203 +11,542 @@ import {
   Plus,
   Sparkles,
   TrendingUp,
+  Upload,
 } from 'lucide-react';
-import { getCategoryVisual } from '../../../core/theme/categoryIcons';
-import { formatMinorUnits } from '../../../core/utils/moneyFormatter';
+import { convertMinorUnits } from '../../../core/utils/currencyConverter';
+import { formatShortDate } from '../../../core/utils/dateMath';
+import {
+  formatMinorUnits,
+  minorUnitsToInputString,
+  parseDecimalToMinorUnits,
+} from '../../../core/utils/moneyFormatter';
 import {
   BILLING_CYCLES,
+  BILLING_CYCLE_LIST,
   USAGE_FREQUENCY_META,
+  ZERO_DECIMAL_DISPLAY_CURRENCIES,
   getAnnualMinorUnits,
+  getEffectiveExchangeRates,
+  getMonthlyMinorUnits,
+  type BillingCycle,
   type Subscription,
   type VaultSettings,
 } from '../../cashflow/domain/subscription';
 import {
-  SAMPLE_BANK_STATEMENT,
-  parseStatementText,
-  type LeakAuditReport,
-  type ParsedStatementCandidate,
-} from '../domain/auditEngine';
+  can,
+  remaining,
+  type EntitlementsState,
+} from '../../billing/domain/entitlements';
+import { ServiceAvatar } from '../../catalog/presentation/ServiceAvatar';
+import { detectDefaultDateOrder } from '../../onboarding/domain/localeCurrency';
+import type { LeakAuditReport } from '../domain/auditEngine';
+import {
+  SAMPLE_STATEMENT_CSV,
+  parseStatementImport,
+  type DateOrder,
+  type StatementImportCandidate,
+} from '../domain/statementImport';
 
 interface AuditAndImportViewProps {
   readonly subscriptions: readonly Subscription[];
   readonly audit: LeakAuditReport;
   readonly settings: VaultSettings;
+  readonly entitlements: EntitlementsState;
   readonly onOpenCancelKit: (id: string) => void;
   readonly onToggleSimulate: (id: string) => void;
-  readonly onImportCandidates: (candidates: readonly ParsedStatementCandidate[]) => void;
+  readonly onImportCandidates: (candidates: readonly StatementImportCandidate[]) => void;
+  readonly onAddSingleCandidate: (candidate: StatementImportCandidate) => boolean;
+  readonly onOpenUpgradeForImport: (
+    candidates: readonly StatementImportCandidate[],
+    contextMessage?: string,
+  ) => void;
+  readonly postUpgradeImportNotice?: { readonly id: number; readonly message: string } | null;
+}
+
+interface CandidateEditOverride {
+  readonly name?: string;
+  readonly amountInput?: string;
+  readonly cycle?: BillingCycle;
 }
 
 export const AuditAndImportView: React.FC<AuditAndImportViewProps> = ({
   subscriptions,
   audit,
   settings,
+  entitlements,
   onOpenCancelKit,
   onToggleSimulate,
   onImportCandidates,
+  onAddSingleCandidate,
+  onOpenUpgradeForImport,
+  postUpgradeImportNotice,
 }) => {
   const [statementText, setStatementText] = useState('');
-  const [deselectedIds, setDeselectedIds] = useState<Set<string>>(new Set());
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [preferredDateOrder, setPreferredDateOrder] = useState<DateOrder>(() =>
+    detectDefaultDateOrder(),
+  );
+  const [deselectedSubIds, setDeselectedSubIds] = useState<Set<string>>(new Set());
+  const [selectedOneOffIds, setSelectedOneOffIds] = useState<Set<string>>(new Set());
+  const [addedSingleIds, setAddedSingleIds] = useState<Set<string>>(new Set());
+  const [showOneOffs, setShowOneOffs] = useState(false);
+  const [editsByTempId, setEditsByTempId] = useState<Record<string, CandidateEditOverride>>({});
   const [importBanner, setImportBanner] = useState<string | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const handledImportNoticeIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!postUpgradeImportNotice) return;
+    if (handledImportNoticeIdRef.current === postUpgradeImportNotice.id) return;
+    handledImportNoticeIdRef.current = postUpgradeImportNotice.id;
+    setImportBanner(postUpgradeImportNotice.message);
+    setStatementText('');
+    setUploadedFileName(null);
+    setDeselectedSubIds(new Set());
+    setSelectedOneOffIds(new Set());
+    setAddedSingleIds(new Set());
+    setEditsByTempId({});
+    setShowOneOffs(false);
+    setFileError(null);
+  }, [postUpgradeImportNotice]);
+
+  const canBulkImport = can('statementImport', entitlements);
+  const remainingFreeSlots = remaining('addSubscription', entitlements);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const baseCurrency = settings.baseCurrency;
-  const showDecimals = baseCurrency !== 'PKR';
+  const showDecimals = !ZERO_DECIMAL_DISPLAY_CURRENCIES.has(baseCurrency);
 
-  const parsedCandidates = useMemo(
-    () => parseStatementText(statementText, subscriptions),
-    [statementText, subscriptions],
+  const parseResult = useMemo(
+    () =>
+      parseStatementImport(statementText, subscriptions, {
+        preferredDateOrder,
+        defaultCurrency: baseCurrency,
+      }),
+    [statementText, subscriptions, preferredDateOrder, baseCurrency],
   );
 
-  const selectedCandidates = useMemo(
-    () => parsedCandidates.filter((c) => !deselectedIds.has(c.tempId)),
-    [parsedCandidates, deselectedIds],
-  );
+  const effectiveDateOrder = parseResult.detectedDateOrder;
 
-  const toggleCandidate = (tempId: string) => {
-    setDeselectedIds((prev) => {
+  const applyCandidateEdits = (cand: StatementImportCandidate): StatementImportCandidate => {
+    const override = editsByTempId[cand.tempId];
+    if (!override) return cand;
+    const editedName = override.name !== undefined ? override.name.trim() || cand.name : cand.name;
+    const parsedMinor =
+      override.amountInput !== undefined ? parseDecimalToMinorUnits(override.amountInput) : null;
+    const editedAmount = parsedMinor !== null ? parsedMinor : cand.amountMinorUnits;
+    const editedCycle = override.cycle ?? cand.cycle;
+    return {
+      ...cand,
+      name: editedName,
+      amountMinorUnits: editedAmount,
+      cycle: editedCycle,
+    };
+  };
+
+  const selectedCandidates = useMemo(() => {
+    const subs = parseResult.subscriptions
+      .filter((c) => !deselectedSubIds.has(c.tempId))
+      .map(applyCandidateEdits);
+    const oneOffs = parseResult.oneOffCharges
+      .filter((c) => selectedOneOffIds.has(c.tempId))
+      .map(applyCandidateEdits);
+    return [...subs, ...oneOffs];
+  }, [parseResult, deselectedSubIds, selectedOneOffIds, editsByTempId]);
+
+  const foundMonthlyTotalBaseMinorUnits = useMemo(() => {
+    const rates = getEffectiveExchangeRates(settings);
+    const markup = settings.cardMarkupPercent ?? 0;
+    return parseResult.subscriptions.reduce((sum, rawCand) => {
+      const cand = applyCandidateEdits(rawCand);
+      const monthlyOwn = getMonthlyMinorUnits(cand.amountMinorUnits, cand.cycle);
+      return (
+        sum +
+        convertMinorUnits(monthlyOwn, cand.currency, baseCurrency, rates, markup)
+      );
+    }, 0);
+  }, [parseResult.subscriptions, editsByTempId, baseCurrency, settings]);
+
+  const resetImportSelections = () => {
+    setDeselectedSubIds(new Set());
+    setSelectedOneOffIds(new Set());
+    setAddedSingleIds(new Set());
+    setEditsByTempId({});
+    setShowOneOffs(false);
+    setImportBanner(null);
+    setFileError(null);
+  };
+
+  const toggleSubCandidate = (tempId: string) => {
+    setDeselectedSubIds((prev) => {
       const next = new Set(prev);
-      if (next.has(tempId)) {
-        next.delete(tempId);
-      } else {
-        next.add(tempId);
-      }
+      if (next.has(tempId)) next.delete(tempId);
+      else next.add(tempId);
       return next;
     });
   };
 
+  const toggleOneOffCandidate = (tempId: string) => {
+    setSelectedOneOffIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(tempId)) next.delete(tempId);
+      else next.add(tempId);
+      return next;
+    });
+  };
+
+  const updateCandidateField = (tempId: string, patch: Partial<CandidateEditOverride>) => {
+    setEditsByTempId((prev) => ({
+      ...prev,
+      [tempId]: { ...prev[tempId], ...patch },
+    }));
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setFileError('File is too large (max 5 MB). Export 3–6 months of statement rows.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = typeof reader.result === 'string' ? reader.result : '';
+      if (!text.trim()) {
+        setFileError('This file looks empty.');
+        return;
+      }
+      setStatementText(text);
+      setUploadedFileName(file.name);
+      resetImportSelections();
+    };
+    reader.onerror = () => {
+      setFileError('Could not read that file. Try saving as CSV or pasting the text.');
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
   const handleLoadSample = () => {
-    setStatementText(SAMPLE_BANK_STATEMENT);
-    setDeselectedIds(new Set());
-    setImportBanner(null);
+    setStatementText(SAMPLE_STATEMENT_CSV);
+    setUploadedFileName(null);
+    resetImportSelections();
   };
 
   const handleCommitImport = () => {
+    if (!canBulkImport) {
+      const targetCandidates =
+        selectedCandidates.length > 0
+          ? selectedCandidates
+          : parseResult.subscriptions.map(applyCandidateEdits);
+      onOpenUpgradeForImport(
+        targetCandidates,
+        `Unlock Pro to import all ${targetCandidates.length} detected ${
+          targetCandidates.length === 1 ? 'subscription' : 'subscriptions'
+        } in one click.`,
+      );
+      return;
+    }
+
     if (selectedCandidates.length === 0) return;
+    const updatesCount = selectedCandidates.filter((c) => Boolean(c.matchedExistingId)).length;
+    const addsCount = selectedCandidates.length - updatesCount;
     onImportCandidates(selectedCandidates);
+
+    const parts: string[] = [];
+    if (addsCount > 0) parts.push(`added ${addsCount}`);
+    if (updatesCount > 0) parts.push(`updated ${updatesCount}`);
     setImportBanner(
-      `Imported ${selectedCandidates.length} ${selectedCandidates.length === 1 ? 'bill' : 'bills'} into your Cashflow Overview.`,
+      `Done — ${parts.join(' and ')} ${
+        selectedCandidates.length === 1 ? 'subscription' : 'subscriptions'
+      } in Home.`,
     );
     setStatementText('');
-    setDeselectedIds(new Set());
+    setUploadedFileName(null);
+    setDeselectedSubIds(new Set());
+    setSelectedOneOffIds(new Set());
+    setAddedSingleIds(new Set());
+    setEditsByTempId({});
+    setShowOneOffs(false);
+  };
+
+  const handleAddSingleRow = (rawCand: StatementImportCandidate) => {
+    const edited = applyCandidateEdits(rawCand);
+    const addedNow = onAddSingleCandidate(edited);
+    if (addedNow) {
+      setAddedSingleIds((prev) => new Set(prev).add(rawCand.tempId));
+      setImportBanner(`Added ${edited.name} to Home.`);
+    }
+  };
+
+  const renderCandidateRow = (
+    cand: StatementImportCandidate,
+    checked: boolean,
+    onToggle: () => void,
+  ) => {
+    const override = editsByTempId[cand.tempId];
+    const nameValue = override?.name ?? cand.name;
+    const amountValue =
+      override?.amountInput ?? minorUnitsToInputString(cand.amountMinorUnits);
+    const cycleValue = override?.cycle ?? cand.cycle;
+    const isUpdate = Boolean(cand.matchedExistingId);
+
+    return (
+      <div
+        key={cand.tempId}
+        data-testid={`import-row-${cand.tempId}`}
+        className={`rounded-xl border p-3 space-y-2.5 transition-colors ${
+          checked ? 'bg-card border-brand' : 'bg-subtle border-border opacity-70'
+        }`}
+      >
+        <div className="flex items-start gap-2.5">
+          <label className="min-h-[36px] min-w-[32px] flex items-center justify-center cursor-pointer shrink-0">
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={onToggle}
+              aria-label={`Select ${nameValue}`}
+              className="accent-brand w-4 h-4 rounded cursor-pointer"
+            />
+          </label>
+
+          <ServiceAvatar
+            name={nameValue}
+            category={cand.category}
+            catalogId={cand.catalogId}
+            size="sm"
+          />
+
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="flex flex-wrap items-center gap-1.5 justify-between">
+              <input
+                type="text"
+                aria-label="Subscription name"
+                value={nameValue}
+                onChange={(e) => updateCandidateField(cand.tempId, { name: e.target.value })}
+                className="min-w-[130px] flex-1 h-9 px-2.5 rounded-lg bg-subtle border border-border text-[13px] font-bold text-text-primary focus:bg-card focus:border-brand"
+              />
+              {!canBulkImport ? (
+                addedSingleIds.has(cand.tempId) ? (
+                  <span className="px-2.5 py-1 rounded-lg bg-brand-soft text-brand-text text-xs font-semibold inline-flex items-center gap-1 whitespace-nowrap">
+                    <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Added</span>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    data-testid={`import-single-add-${cand.tempId}`}
+                    onClick={() => handleAddSingleRow(cand)}
+                    className="min-h-[36px] px-2.5 py-1 rounded-lg bg-brand-soft border border-brand-border hover:border-brand text-brand-text text-xs font-semibold whitespace-nowrap cursor-pointer transition-colors"
+                  >
+                    {isUpdate ? 'Update' : 'Add one'}
+                  </button>
+                )
+              ) : (
+                <span
+                  className={`px-2 py-0.5 rounded-md text-xs font-semibold whitespace-nowrap ${
+                    isUpdate
+                      ? 'bg-amber-soft text-amber-text'
+                      : 'bg-brand-soft text-brand-text'
+                  }`}
+                >
+                  {isUpdate ? 'Update price' : 'Add'}
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="relative">
+                <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-text-secondary">
+                  {cand.currency}
+                </span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  aria-label={`Price for ${nameValue}`}
+                  value={amountValue}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (/^[0-9,]*\.?[0-9]{0,2}$/.test(val)) {
+                      updateCandidateField(cand.tempId, { amountInput: val });
+                    }
+                  }}
+                  className="w-full h-9 pl-11 pr-2.5 rounded-lg bg-subtle border border-border text-[13px] font-bold tabular-nums text-text-primary focus:bg-card focus:border-brand"
+                />
+              </div>
+
+              <select
+                aria-label={`Billing cycle for ${nameValue}`}
+                value={cycleValue}
+                onChange={(e) =>
+                  updateCandidateField(cand.tempId, {
+                    cycle: e.target.value as BillingCycle,
+                  })
+                }
+                className="w-full h-9 px-2.5 rounded-lg bg-subtle border border-border text-[13px] font-medium text-text-primary focus:bg-card focus:border-brand"
+              >
+                {BILLING_CYCLE_LIST.map((cycleOption) => (
+                  <option key={cycleOption} value={cycleOption}>
+                    {BILLING_CYCLES[cycleOption].label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-text-secondary tabular-nums">
+              <span>
+                {cand.confidence === 'high'
+                  ? `${cand.chargeCount} matching charges`
+                  : cand.confidence === 'likely'
+                    ? 'Known service'
+                    : 'One-off charge'}
+              </span>
+              <span>·</span>
+              <span>Next {formatShortDate(cand.nextBillingDate)}</span>
+              {cand.dateEstimated && (
+                <>
+                  <span>·</span>
+                  <span className="font-semibold text-amber-text">date estimated</span>
+                </>
+              )}
+              {cand.detectedPriceHikeMinorUnits > 0 && (
+                <>
+                  <span>·</span>
+                  <span className="font-semibold text-amber-text">
+                    +
+                    {formatMinorUnits(cand.detectedPriceHikeMinorUnits, cand.currency, {
+                      showDecimals: !ZERO_DECIMAL_DISPLAY_CURRENCIES.has(cand.currency),
+                    })}{' '}
+                    higher
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
-    <div className="space-y-6" data-testid="audit-view">
+    <div className="space-y-6" data-testid="insights-view">
       {/* Header */}
       <div>
-        <h1 className="text-2xl sm:text-[28px] font-extrabold tracking-tight text-[#17211E]">
-          Leak Audit &amp; Statement Scanner
+        <h1 className="text-2xl sm:text-[28px] font-extrabold tracking-tight text-text-primary">
+          Insights
         </h1>
-        <p className="mt-1 text-sm text-[#5B6662]">
-          Catch silent price hikes, unused subscriptions, and overlapping tools — or paste a bank statement locally.
+        <p className="mt-1 text-[15px] sm:text-sm text-text-secondary">
+          Spot price increases, unused plans, and overlapping tools.
         </p>
       </div>
 
-      {/* Top Opportunity Cost Summary Card */}
-      <section className="rounded-2xl bg-[#E6F2EE]/75 border border-[#C6E2D8] p-5 sm:p-6">
+      {/* Savings Summary First */}
+      <section className="rounded-2xl bg-brand-soft border border-brand-border p-5 sm:p-6">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-center">
           <div>
-            <p className="text-xs font-semibold text-[#155243]">Reclaimable Annual Spend</p>
+            <p className="text-[13px] font-semibold text-brand-text">Savings found</p>
             <p
-              className="mt-1 font-mono tabular-nums text-3xl font-extrabold text-[#1E6B58]"
-              data-testid="audit-reclaimable-total"
+              className="mt-1 tabular-nums text-3xl font-extrabold text-brand-text"
+              data-testid="insights-savings-total"
             >
               {formatMinorUnits(audit.totalReclaimableAnnualMinorUnits, baseCurrency, {
                 showDecimals: false,
               })}
-              <span className="text-base font-semibold text-[#386559]">/yr</span>
+              <span className="text-base font-semibold text-text-secondary">/yr</span>
             </p>
-            <p className="mt-1 text-xs text-[#386559]">
-              From {audit.lowValueSubscriptions.length} low-use{' '}
-              {audit.lowValueSubscriptions.length === 1 ? 'bill' : 'bills'} and{' '}
-              {audit.priceHikes.length} price {audit.priceHikes.length === 1 ? 'hike' : 'hikes'}
+            <p className="mt-1 text-[13px] text-text-secondary">
+              {audit.lowValueSubscriptions.length} low-use and {audit.priceHikes.length} price{' '}
+              {audit.priceHikes.length === 1 ? 'increase' : 'increases'}
             </p>
           </div>
 
-          <div className="md:border-l md:border-[#C6E2D8] md:pl-5">
-            <p className="text-xs font-semibold text-[#155243] flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-[#1E6B58]" aria-hidden="true" />
-              <span>5-Year Wealth Impact (7% APR)</span>
+          <div className="md:border-l md:border-brand-border md:pl-5">
+            <p className="text-[13px] font-semibold text-brand-text flex items-center gap-1.5">
+              <Sparkles className="w-4 h-4 text-brand-text shrink-0" aria-hidden="true" />
+              <span>If invested for 5 years at 7%/yr</span>
             </p>
             <p
-              className="mt-1 font-mono tabular-nums text-2xl font-bold text-[#17211E]"
-              data-testid="audit-5yr-wealth"
+              className="mt-1 tabular-nums text-2xl font-bold text-text-primary"
+              data-testid="insights-5yr-wealth"
             >
               {formatMinorUnits(audit.fiveYearInvestedValueMinorUnits, baseCurrency, {
                 showDecimals: false,
               })}
             </p>
-            <p className="mt-1 text-xs text-[#386559]">
-              If reclaimed monthly cash is invested instead
+            <p className="mt-1 text-[13px] text-text-secondary">
+              Illustration only, not financial advice.
             </p>
           </div>
 
-          <div className="md:border-l md:border-[#C6E2D8] md:pl-5">
-            <p className="text-xs font-semibold text-[#155243]">Silent Price Creep</p>
-            <p className="mt-1 font-mono tabular-nums text-2xl font-bold text-[#B86A14]">
+          <div className="md:border-l md:border-brand-border md:pl-5">
+            <p className="text-[13px] font-semibold text-brand-text">Yearly price increases</p>
+            <p className="mt-1 tabular-nums text-2xl font-bold text-amber-text">
               +
               {formatMinorUnits(audit.annualPriceHikeCreepMinorUnits, baseCurrency, {
                 showDecimals,
               })}
               <span className="text-sm font-semibold">/yr</span>
             </p>
-            <p className="mt-1 text-xs text-[#386559]">
-              Extra yearly cost from recent provider increases
+            <p className="mt-1 text-[13px] text-text-secondary">
+              Extra yearly cost from recent price changes
             </p>
           </div>
         </div>
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column (7 cols): Price Hikes, Unused Bills, Overlaps */}
+        {/* Left Column (7 cols): Price Increases, Unused, Overlaps */}
         <div className="lg:col-span-7 space-y-5">
-          {/* 1. Price Hike Radar */}
-          <section className="rounded-2xl vault-surface p-5 space-y-4">
+          {/* 1. Price Increases */}
+          <section className="rounded-2xl app-surface p-5 space-y-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-[#B86A14]" aria-hidden="true" />
-                <h2 className="text-base font-bold text-[#17211E]">
-                  Price Hikes Detected ({audit.priceHikes.length})
+                <TrendingUp className="w-4 h-4 text-amber" aria-hidden="true" />
+                <h2 className="text-base font-bold text-text-primary">
+                  Price increases ({audit.priceHikes.length})
                 </h2>
               </div>
-              <span className="text-xs text-[#85918C]">Compare vs. prior rate</span>
+              <span className="text-[13px] text-text-secondary">vs. previous price</span>
             </div>
 
             {audit.priceHikes.length === 0 ? (
-              <p className="text-xs text-[#5B6662] py-2">
-                No recent price increases flagged. Add a prior rate when editing any bill or scan a new bank statement to catch hikes automatically.
+              <p className="text-[13px] text-text-secondary py-1">
+                No price increases found. Add a prior price when editing any subscription.
               </p>
             ) : (
               <div className="space-y-3">
                 {audit.priceHikes.map((hike) => {
                   const sub = hike.subscription;
-                  const visual = getCategoryVisual(sub.category);
-                  const Icon = visual.Icon;
                   return (
                     <div
                       key={sub.id}
-                      className="rounded-xl bg-[#FDF9F3] border border-[#EED9BD] p-3.5 flex flex-wrap items-center justify-between gap-3"
+                      className="rounded-xl bg-amber-soft border border-amber-border p-3.5 flex flex-wrap items-center justify-between gap-3"
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <div
-                          className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                          style={{ backgroundColor: `${visual.color}16` }}
-                        >
-                          <Icon className="w-4 h-4" style={{ color: visual.color }} aria-hidden="true" />
-                        </div>
+                        <ServiceAvatar
+                          name={sub.name}
+                          category={sub.category}
+                          catalogId={sub.catalogId}
+                          size="md"
+                        />
                         <div className="min-w-0">
-                          <p className="text-sm font-bold text-[#17211E] truncate">{sub.name}</p>
-                          <p className="text-xs text-[#5B6662] font-mono tabular-nums">
+                          <p className="text-[15px] font-semibold text-text-primary truncate">
+                            {sub.name}
+                          </p>
+                          <p className="text-[13px] text-text-secondary tabular-nums">
                             {formatMinorUnits(sub.previousAmountMinorUnits!, sub.currency, {
-                              showDecimals: sub.currency !== 'PKR',
+                              showDecimals: !ZERO_DECIMAL_DISPLAY_CURRENCIES.has(sub.currency),
                             })}{' '}
                             &rarr;{' '}
-                            <strong className="text-[#17211E]">
+                            <strong className="text-text-primary">
                               {formatMinorUnits(sub.amountMinorUnits, sub.currency, {
-                                showDecimals: sub.currency !== 'PKR',
+                                showDecimals: !ZERO_DECIMAL_DISPLAY_CURRENCIES.has(sub.currency),
                               })}
                             </strong>
                             {BILLING_CYCLES[sub.cycle].shortSuffix}{' '}
-                            <span className="text-[#B86A14] font-semibold">
+                            <span className="text-amber-text font-semibold">
                               (+{hike.percentIncrease}%)
                             </span>
                           </p>
@@ -215,10 +556,10 @@ export const AuditAndImportView: React.FC<AuditAndImportViewProps> = ({
                       <button
                         type="button"
                         onClick={() => onOpenCancelKit(sub.id)}
-                        className="min-h-[34px] px-3 py-1.5 rounded-lg bg-white border border-[#E4D0B5] hover:border-[#B86A14] text-xs font-semibold text-[#8A4F0B] flex items-center gap-1.5 cursor-pointer transition-colors"
+                        className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-card border border-amber-border hover:border-amber text-[13px] font-semibold text-amber-text flex items-center gap-1.5 cursor-pointer transition-colors"
                       >
-                        <Mail className="w-3.5 h-3.5" aria-hidden="true" />
-                        <span>Negotiate Rate</span>
+                        <Mail className="w-4 h-4" aria-hidden="true" />
+                        <span>How to cancel</span>
                       </button>
                     </div>
                   );
@@ -227,53 +568,50 @@ export const AuditAndImportView: React.FC<AuditAndImportViewProps> = ({
             )}
           </section>
 
-          {/* 2. Low-Value & Zombie Subscriptions */}
-          <section className="rounded-2xl vault-surface p-5 space-y-4">
+          {/* 2. Unused & Rarely Used */}
+          <section className="rounded-2xl app-surface p-5 space-y-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-[#C64545]" aria-hidden="true" />
-                <h2 className="text-base font-bold text-[#17211E]">
-                  Unused &amp; Rarely Used ({audit.lowValueSubscriptions.length})
+                <AlertCircle className="w-4 h-4 text-amber" aria-hidden="true" />
+                <h2 className="text-base font-bold text-text-primary">
+                  Unused &amp; rarely used ({audit.lowValueSubscriptions.length})
                 </h2>
               </div>
-              <span className="text-xs font-mono tabular-nums font-semibold text-[#C64545]">
+              <span className="text-[13px] tabular-nums font-semibold text-amber-text">
                 {formatMinorUnits(audit.annualLowValueSavingsMinorUnits, baseCurrency, {
                   showDecimals: false,
                 })}
-                /yr at risk
+                /yr
               </span>
             </div>
 
             {audit.lowValueSubscriptions.length === 0 ? (
-              <p className="text-xs text-[#5B6662] py-2">
-                Every active bill is marked Daily or Weekly. Mark any bill as Rarely or Unused on Overview to surface savings here.
+              <p className="text-[13px] text-text-secondary py-1">
+                Every active subscription is used often. Change usage inside any item on Home.
               </p>
             ) : (
               <div className="space-y-3">
                 {audit.lowValueSubscriptions.map((sub) => {
-                  const visual = getCategoryVisual(sub.category);
-                  const Icon = visual.Icon;
                   const freq = sub.usageFrequency ?? 'unused';
                   const annualOwn = getAnnualMinorUnits(sub.amountMinorUnits, sub.cycle);
                   return (
                     <div
                       key={sub.id}
-                      className="rounded-xl bg-[#FDF6F6] border border-[#EED3D3] p-3.5 flex flex-wrap items-center justify-between gap-3"
+                      className="rounded-xl bg-subtle border border-border p-3.5 flex flex-wrap items-center justify-between gap-3"
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <div
-                          className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                          style={{ backgroundColor: `${visual.color}16` }}
-                        >
-                          <Icon className="w-4 h-4" style={{ color: visual.color }} aria-hidden="true" />
-                        </div>
+                        <ServiceAvatar
+                          name={sub.name}
+                          category={sub.category}
+                          catalogId={sub.catalogId}
+                          size="md"
+                        />
                         <div className="min-w-0">
-                          <p className="text-sm font-bold text-[#17211E] truncate">{sub.name}</p>
-                          <p className="text-xs text-[#5B6662] font-mono tabular-nums">
-                            <span
-                              className="font-semibold"
-                              style={{ color: USAGE_FREQUENCY_META[freq].tone }}
-                            >
+                          <p className="text-[15px] font-semibold text-text-primary truncate">
+                            {sub.name}
+                          </p>
+                          <p className="text-[13px] text-text-secondary tabular-nums">
+                            <span className="font-semibold text-amber-text">
                               {USAGE_FREQUENCY_META[freq].label}
                             </span>{' '}
                             ·{' '}
@@ -285,22 +623,22 @@ export const AuditAndImportView: React.FC<AuditAndImportViewProps> = ({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
                           onClick={() => onToggleSimulate(sub.id)}
-                          className="min-h-[34px] px-2.5 py-1 rounded-lg bg-white border border-[#E4E7E1] hover:border-[#1E6B58] text-xs font-semibold text-[#17211E] flex items-center gap-1 cursor-pointer"
+                          className="min-h-[40px] px-3 py-1.5 rounded-xl bg-card border border-border hover:border-brand text-[13px] font-semibold text-text-primary flex items-center gap-1.5 cursor-pointer transition-colors"
                         >
-                          <Pause className="w-3.5 h-3.5 text-[#5B6662]" aria-hidden="true" />
-                          <span>Simulate Cut</span>
+                          <Pause className="w-3.5 h-3.5 text-text-secondary" aria-hidden="true" />
+                          <span>What if I cancel?</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => onOpenCancelKit(sub.id)}
-                          className="min-h-[34px] px-3 py-1 rounded-lg bg-[#C64545] hover:bg-[#AE3939] text-xs font-semibold text-white flex items-center gap-1 cursor-pointer"
+                          className="min-h-[40px] px-3 py-1.5 rounded-xl bg-brand hover:bg-brand-hover text-[13px] font-semibold text-white flex items-center gap-1.5 cursor-pointer transition-colors"
                         >
                           <Mail className="w-3.5 h-3.5" aria-hidden="true" />
-                          <span>Cancel Kit</span>
+                          <span>How to cancel</span>
                         </button>
                       </div>
                     </div>
@@ -310,30 +648,30 @@ export const AuditAndImportView: React.FC<AuditAndImportViewProps> = ({
             )}
           </section>
 
-          {/* 3. Category Overlap Radar */}
+          {/* 3. Category Overlaps */}
           {audit.overlapGroups.length > 0 && (
-            <section className="rounded-2xl vault-surface p-5 space-y-3.5">
+            <section className="rounded-2xl app-surface p-5 space-y-3.5">
               <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-[#2A8C94]" aria-hidden="true" />
-                <h2 className="text-base font-bold text-[#17211E]">
-                  Category Overlaps ({audit.overlapGroups.length})
+                <Layers className="w-4 h-4 text-brand-text" aria-hidden="true" />
+                <h2 className="text-base font-bold text-text-primary">
+                  Overlaps ({audit.overlapGroups.length})
                 </h2>
               </div>
               <div className="space-y-2.5">
                 {audit.overlapGroups.map((group) => (
                   <div
                     key={group.category}
-                    className="rounded-xl bg-[#F5F6F3] border border-[#E4E7E1] px-4 py-3 flex flex-wrap items-center justify-between gap-2"
+                    className="rounded-xl bg-subtle border border-border px-4 py-3 flex flex-wrap items-center justify-between gap-2"
                   >
                     <div>
-                      <p className="text-sm font-bold text-[#17211E]">
-                        {group.label} · {group.count} active bills
+                      <p className="text-[15px] font-semibold text-text-primary">
+                        {group.label} · {group.count} active
                       </p>
-                      <p className="text-xs text-[#5B6662] mt-0.5">
+                      <p className="text-[13px] text-text-secondary mt-0.5">
                         {group.items.map((i) => i.name).join(', ')}
                       </p>
                     </div>
-                    <span className="font-mono tabular-nums text-sm font-bold text-[#17211E]">
+                    <span className="tabular-nums text-[15px] font-bold text-text-primary">
                       {formatMinorUnits(group.monthlyTotalBaseMinorUnits, baseCurrency, {
                         showDecimals,
                       })}
@@ -346,37 +684,106 @@ export const AuditAndImportView: React.FC<AuditAndImportViewProps> = ({
           )}
         </div>
 
-        {/* Right Column (5 cols): Smart Local Bank Statement / SMS / CSV Importer */}
+        {/* Right Column (5 cols): Sticky Import from Bank Statement V2 */}
         <section
-          className="lg:col-span-5 rounded-2xl vault-surface p-5 space-y-4"
-          aria-label="Smart bank statement importer"
+          className="lg:col-span-5 lg:sticky lg:top-20 rounded-2xl app-surface p-5 space-y-4"
+          aria-label="Import from bank statement"
+          data-testid="statement-import-section"
         >
-          <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet className="w-4 h-4 text-brand-text" aria-hidden="true" />
+              <h2 className="text-base font-bold text-text-primary">
+                Import from bank statement
+              </h2>
+            </div>
+            <p className="mt-1 text-[13px] text-text-secondary">
+              Upload a CSV/TXT export or paste card SMS alerts. Everything stays in your browser.
+            </p>
+          </div>
+
+          {/* Upload .csv / .txt + Date Order Toggle */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <div className="flex items-center gap-2">
-                <FileSpreadsheet className="w-4 h-4 text-[#1E6B58]" aria-hidden="true" />
-                <h2 className="text-base font-bold text-[#17211E]">
-                  Statement &amp; SMS Scanner
-                </h2>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.txt,text/csv,text/plain"
+                onChange={handleFileChange}
+                className="sr-only"
+                id="statement-file-upload"
+                data-testid="statement-file-input"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="min-h-[40px] px-3.5 py-2 rounded-xl bg-subtle border border-border hover:border-brand text-[13px] font-semibold text-text-primary inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+              >
+                <Upload className="w-4 h-4 text-brand-text" aria-hidden="true" />
+                <span>{uploadedFileName ? uploadedFileName : 'Upload CSV / TXT'}</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-medium text-text-secondary">Dates are</span>
+              <div
+                className="inline-flex rounded-xl bg-subtle border border-border p-0.5"
+                role="group"
+                aria-label="Statement date format"
+              >
+                {(['DMY', 'MDY'] as const).map((order) => {
+                  const active = effectiveDateOrder === order;
+                  return (
+                    <button
+                      key={order}
+                      type="button"
+                      aria-pressed={active}
+                      data-testid={`date-order-${order}`}
+                      onClick={() => setPreferredDateOrder(order)}
+                      className={`min-h-[32px] px-2.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                        active
+                          ? 'bg-card text-text-primary shadow-xs'
+                          : 'text-text-secondary hover:text-text-primary'
+                      }`}
+                    >
+                      {order === 'DMY' ? 'DD/MM' : 'MM/DD'}
+                    </button>
+                  );
+                })}
               </div>
-              <p className="mt-1 text-xs text-[#5B6662]">
-                Paste card SMS alerts, bank CSV rows, or billing emails. Parsed 100% offline in your browser.
-              </p>
             </div>
           </div>
 
+          {parseResult.dateOrderAutoSwitched && (
+            <p className="text-xs font-medium text-brand-text">
+              Detected {effectiveDateOrder === 'MDY' ? 'MM/DD' : 'DD/MM'} dates in this file.
+            </p>
+          )}
+
+          {fileError && (
+            <div
+              role="alert"
+              className="rounded-xl bg-red-soft border border-red-border px-3.5 py-2.5 text-[13px] font-medium text-red-text"
+            >
+              {fileError}
+            </div>
+          )}
+
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <label htmlFor="statement-paste-input" className="text-xs font-semibold text-[#5B6662]">
-                Paste raw transactions
+              <label
+                htmlFor="statement-paste-input"
+                className="text-[13px] font-semibold text-text-secondary"
+              >
+                Paste CSV or card alerts
               </label>
               <button
                 type="button"
                 onClick={handleLoadSample}
                 data-testid="load-sample-statement"
-                className="text-xs font-semibold text-[#1E6B58] hover:text-[#155243] cursor-pointer"
+                className="min-h-[36px] text-[13px] font-semibold text-brand-text hover:underline cursor-pointer"
               >
-                Load Realistic Statement
+                Load sample CSV
               </button>
             </div>
 
@@ -386,11 +793,11 @@ export const AuditAndImportView: React.FC<AuditAndImportViewProps> = ({
               value={statementText}
               onChange={(e) => {
                 setStatementText(e.target.value);
-                setDeselectedIds(new Set());
-                if (importBanner) setImportBanner(null);
+                setUploadedFileName(null);
+                resetImportSelections();
               }}
-              placeholder={`2026-11-18 | SPOTIFY PREMIUM | $11.99\n2026-11-19 | CHATGPT PLUS | $20.00`}
-              className="w-full p-3 rounded-xl bg-[#F5F6F3] border border-[#E4E7E1] font-mono text-xs text-[#17211E] placeholder:text-[#85918C] focus:outline-none focus:border-[#1E6B58]"
+              placeholder={`Date,Description,Debit,Credit\n2026-11-05,NETFLIX.COM,15.49,\nPKR 5,850.00 charged on card ending 1234 at OPENAI *CHATGPT SUBSCR on 18-11-2026`}
+              className="w-full p-3 rounded-xl bg-subtle border border-border text-[13px] tabular-nums text-text-primary placeholder:text-text-secondary focus:bg-card focus:border-brand"
             />
           </div>
 
@@ -398,95 +805,114 @@ export const AuditAndImportView: React.FC<AuditAndImportViewProps> = ({
             <div
               role="status"
               data-testid="statement-import-success"
-              className="rounded-xl bg-[#E6F2EE] border border-[#B9DDD0] px-3.5 py-2.5 text-xs font-semibold text-[#155243] flex items-center gap-2"
+              className="rounded-xl bg-brand-soft border border-brand-border px-3.5 py-2.5 text-[13px] font-semibold text-brand-text flex items-center gap-2"
             >
               <Check className="w-4 h-4 shrink-0" aria-hidden="true" />
               <span>{importBanner}</span>
             </div>
           )}
 
-          {parsedCandidates.length > 0 && (
+          {(parseResult.subscriptions.length > 0 || parseResult.oneOffCharges.length > 0) && (
             <div className="space-y-3" data-testid="parsed-statement-results">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-[#17211E]">
-                  Detected {parsedCandidates.length} recurring{' '}
-                  {parsedCandidates.length === 1 ? 'charge' : 'charges'}
-                </span>
-                <span className="text-[#5B6662]">
-                  {selectedCandidates.length} selected
-                </span>
+              {/* Review Summary Header */}
+              <div className="rounded-xl bg-brand-soft border border-brand-border px-3.5 py-2.5">
+                <p
+                  data-testid="statement-found-summary"
+                  className="text-[14px] font-bold text-text-primary tabular-nums"
+                >
+                  We found {parseResult.subscriptions.length}{' '}
+                  {parseResult.subscriptions.length === 1 ? 'subscription' : 'subscriptions'} — ≈{' '}
+                  {formatMinorUnits(foundMonthlyTotalBaseMinorUnits, baseCurrency, {
+                    showDecimals: false,
+                  })}
+                  /month
+                </p>
+                {parseResult.skippedCount > 0 && (
+                  <p className="text-xs text-text-secondary mt-0.5">
+                    Filtered out {parseResult.skippedCount} non-subscription{' '}
+                    {parseResult.skippedCount === 1 ? 'entry' : 'entries'} (transfers, groceries,
+                    fuel, credits).
+                  </p>
+                )}
               </div>
 
-              <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                {parsedCandidates.map((cand) => {
-                  const checked = !deselectedIds.has(cand.tempId);
-                  const visual = getCategoryVisual(cand.category);
-                  return (
-                    <label
-                      key={cand.tempId}
-                      className={`flex items-start gap-2.5 rounded-xl border p-3 cursor-pointer transition-colors ${
-                        checked
-                          ? 'bg-white border-[#1E6B58]/50'
-                          : 'bg-[#F5F6F3] border-[#E4E7E1] opacity-65'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleCandidate(cand.tempId)}
-                        className="mt-0.5 accent-[#1E6B58] w-4 h-4 rounded cursor-pointer"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-bold text-[#17211E] truncate">
-                            {cand.name}
-                          </span>
-                          <span className="font-mono tabular-nums text-xs font-bold text-[#17211E] shrink-0">
-                            {formatMinorUnits(cand.amountMinorUnits, cand.currency, {
-                              showDecimals: cand.currency !== 'PKR',
-                            })}
-                          </span>
-                        </div>
-                        <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11px] text-[#5B6662]">
-                          <span>{visual.label}</span>
-                          <span>·</span>
-                          <span>{BILLING_CYCLES[cand.cycle].label}</span>
-                          {cand.detectedPriceHikeMinorUnits > 0 && (
-                            <>
-                              <span>·</span>
-                              <span className="font-semibold text-[#B86A14]">
-                                +
-                                {formatMinorUnits(cand.detectedPriceHikeMinorUnits, cand.currency)}{' '}
-                                hike vs. existing
-                              </span>
-                            </>
-                          )}
-                          {cand.matchedExistingId && cand.detectedPriceHikeMinorUnits === 0 && (
-                            <>
-                              <span>·</span>
-                              <span className="text-[#1E6B58] font-medium">Matches existing</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </label>
-                  );
-                })}
-              </div>
+              {/* High & Likely Subscriptions */}
+              {parseResult.subscriptions.length > 0 && (
+                <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-0.5">
+                  {parseResult.subscriptions.map((cand) =>
+                    renderCandidateRow(
+                      cand,
+                      !deselectedSubIds.has(cand.tempId),
+                      () => toggleSubCandidate(cand.tempId),
+                    ),
+                  )}
+                </div>
+              )}
 
-              <button
-                type="button"
-                disabled={selectedCandidates.length === 0}
-                onClick={handleCommitImport}
-                data-testid="commit-statement-import"
-                className="w-full min-h-[42px] px-4 py-2 rounded-xl bg-[#1E6B58] hover:bg-[#175747] disabled:opacity-45 text-xs font-semibold text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <Plus className="w-4 h-4" aria-hidden="true" />
-                <span>
-                  Import {selectedCandidates.length} Selected{' '}
-                  {selectedCandidates.length === 1 ? 'Bill' : 'Bills'}
-                </span>
-              </button>
+              {/* Collapsed Unchecked One-Off Charges */}
+              {parseResult.oneOffCharges.length > 0 && (
+                <div className="rounded-xl border border-border bg-subtle/70">
+                  <button
+                    type="button"
+                    aria-expanded={showOneOffs}
+                    data-testid="toggle-one-off-charges"
+                    onClick={() => setShowOneOffs((prev) => !prev)}
+                    className="w-full min-h-[44px] px-3.5 py-2 flex items-center justify-between gap-2 text-[13px] font-semibold text-text-secondary hover:text-text-primary cursor-pointer"
+                  >
+                    <span>Other one-off charges ({parseResult.oneOffCharges.length})</span>
+                    {showOneOffs ? (
+                      <ChevronUp className="w-4 h-4" aria-hidden="true" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4" aria-hidden="true" />
+                    )}
+                  </button>
+                  {showOneOffs && (
+                    <div className="px-2.5 pb-2.5 space-y-2">
+                      {parseResult.oneOffCharges.map((cand) =>
+                        renderCandidateRow(
+                          cand,
+                          selectedOneOffIds.has(cand.tempId),
+                          () => toggleOneOffCandidate(cand.tempId),
+                        ),
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!canBulkImport && (
+                <p className="text-xs text-text-secondary">
+                  {remainingFreeSlots > 0
+                    ? `Free plan: add up to ${remainingFreeSlots} more one by one, or unlock Pro to import everything at once.`
+                    : 'Free plan limit of 8 active subscriptions reached. Unlock Pro to import all detected subscriptions.'}
+                </p>
+              )}
+
+              {canBulkImport ? (
+                <button
+                  type="button"
+                  disabled={selectedCandidates.length === 0}
+                  onClick={handleCommitImport}
+                  data-testid="commit-statement-import"
+                  className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-brand hover:bg-brand-hover disabled:opacity-45 text-[15px] font-semibold text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" aria-hidden="true" />
+                  <span>
+                    Import {selectedCandidates.length}{' '}
+                    {selectedCandidates.length === 1 ? 'subscription' : 'subscriptions'}
+                  </span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleCommitImport}
+                  data-testid="statement-unlock-pro-button"
+                  className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-brand hover:bg-brand-hover text-[15px] font-semibold text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4" aria-hidden="true" />
+                  <span>Unlock with Pro</span>
+                </button>
+              )}
             </div>
           )}
         </section>

@@ -3,24 +3,43 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>VaultFlow — Recurring Cashflow &amp; Subscription Radar</title>
+    <title>VaultFlow — Track Subscriptions &amp; Renewal Dates</title>
     <meta
       name="description"
-      content="Privacy-first, offline-first recurring cashflow, subscription, and free-trial radar with an interactive burn dial, What-If savings simulator, and cashflow calendar."
+      content="Find every subscription you pay for without connecting your bank, and get reminded before every renewal."
     />
-    <meta property="og:title" content="VaultFlow — Recurring Cashflow & Subscription Radar" />
+    <meta property="og:title" content="VaultFlow — Track Subscriptions & Renewal Dates" />
     <meta
       property="og:description"
-      content="Track subscriptions, guard free trials, and simulate annual cashflow savings locally on-device."
+      content="Find every subscription you pay for without connecting your bank, and get reminded before every renewal."
     />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
-      rel="stylesheet"
-    />
+    <meta name="theme-color" content="#1E6B58" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="VaultFlow" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+    <script>
+      (function () {
+        try {
+          var mode = localStorage.getItem('vaultflow_theme_v1') || 'system';
+          var dark =
+            mode === 'dark' ||
+            (mode === 'system' &&
+              window.matchMedia &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) {
+            document.documentElement.classList.add('dark');
+            document.documentElement.style.colorScheme = 'dark';
+          } else {
+            document.documentElement.style.colorScheme = 'light';
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
-  <body class="bg-[#F5F6F3] text-[#17211E] antialiased selection:bg-[#1E6B58]/15 selection:text-[#17211E]">
+  <body class="bg-page text-text-primary antialiased selection:bg-brand/15 selection:text-text-primary">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

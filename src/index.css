@@ -1,26 +1,101 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
-@theme {
+:root {
+  --vf-page: #F5F6F3;
+  --vf-card: #FFFFFF;
+  --vf-subtle: #EEF1EC;
+  --vf-border: #E4E7E1;
+  --vf-text-primary: #17211E;
+  --vf-text-secondary: #5B6662;
+  --vf-text-disabled: #85918C;
+
+  --vf-brand: #1E6B58;
+  --vf-brand-hover: #175747;
+  --vf-brand-text: #155243;
+  --vf-brand-soft: #E6F2EE;
+  --vf-brand-border: #C4DFD6;
+
+  --vf-amber: #B86A14;
+  --vf-amber-text: #8A4E0B;
+  --vf-amber-soft: #FDF6EC;
+  --vf-amber-border: #EED8B8;
+
+  --vf-red: #C64545;
+  --vf-red-hover: #AD3838;
+  --vf-red-text: #A63535;
+  --vf-red-soft: #FCEEEE;
+  --vf-red-border: #EBCACA;
+
+  --vf-surface-shadow: 0 1px 2px rgba(23, 33, 30, 0.04), 0 10px 24px -16px rgba(23, 33, 30, 0.09);
+  --vf-backdrop: rgba(23, 33, 30, 0.42);
+}
+
+.dark {
+  --vf-page: #111614;
+  --vf-card: #181F1D;
+  --vf-subtle: #212A27;
+  --vf-border: #2C3733;
+  --vf-text-primary: #F0F3F1;
+  --vf-text-secondary: #A9B5B0;
+  --vf-text-disabled: #6B7873;
+
+  --vf-brand: #23826B;
+  --vf-brand-hover: #1C6B58;
+  --vf-brand-text: #65D4B4;
+  --vf-brand-soft: #152B25;
+  --vf-brand-border: #244A3F;
+
+  --vf-amber: #E39C42;
+  --vf-amber-text: #F4BE74;
+  --vf-amber-soft: #2B2013;
+  --vf-amber-border: #523D1E;
+
+  --vf-red: #DC5B5B;
+  --vf-red-hover: #C64545;
+  --vf-red-text: #F59494;
+  --vf-red-soft: #2E1819;
+  --vf-red-border: #592C2E;
+
+  --vf-surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 10px 24px -16px rgba(0, 0, 0, 0.45);
+  --vf-backdrop: rgba(6, 10, 8, 0.68);
+}
+
+@theme inline {
   --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  --color-vault-base: #F5F6F3;
-  --color-vault-card: #FFFFFF;
-  --color-vault-elevated: #EEF1EC;
-  --color-vault-border: #E4E7E1;
-  --color-vault-accent: #1E6B58;
-  --color-vault-emerald: #1E7E5F;
-  --color-vault-amber: #B86A14;
-  --color-vault-danger: #C64545;
-  --color-vault-text: #17211E;
-  --color-vault-muted: #5B6662;
+  --color-text-primary: var(--vf-text-primary);
+  --color-text-secondary: var(--vf-text-secondary);
+  --color-text-disabled: var(--vf-text-disabled);
+
+  --color-page: var(--vf-page);
+  --color-card: var(--vf-card);
+  --color-subtle: var(--vf-subtle);
+  --color-border: var(--vf-border);
+
+  --color-brand: var(--vf-brand);
+  --color-brand-hover: var(--vf-brand-hover);
+  --color-brand-text: var(--vf-brand-text);
+  --color-brand-soft: var(--vf-brand-soft);
+  --color-brand-border: var(--vf-brand-border);
+
+  --color-amber: var(--vf-amber);
+  --color-amber-text: var(--vf-amber-text);
+  --color-amber-soft: var(--vf-amber-soft);
+  --color-amber-border: var(--vf-amber-border);
+
+  --color-red: var(--vf-red);
+  --color-red-hover: var(--vf-red-hover);
+  --color-red-text: var(--vf-red-text);
+  --color-red-soft: var(--vf-red-soft);
+  --color-red-border: var(--vf-red-border);
 }
 
 @layer base {
   html,
   body {
-    background-color: #F5F6F3;
-    color: #17211E;
+    background-color: var(--vf-page);
+    color: var(--vf-text-primary);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -29,41 +104,47 @@
   .tabular-nums {
     font-variant-numeric: tabular-nums;
   }
+
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid var(--vf-brand);
+    outline-offset: 2px;
+  }
 }
 
-/* Tactile soft-daylight elevated card utility */
-.vault-surface {
-  background-color: #FFFFFF;
-  border: 1px solid #E4E7E1;
-  box-shadow:
-    0 1px 2px rgba(23, 33, 30, 0.04),
-    0 10px 24px -16px rgba(23, 33, 30, 0.09);
+.app-surface {
+  background-color: var(--vf-card);
+  border: 1px solid var(--vf-border);
+  box-shadow: var(--vf-surface-shadow);
 }
 
-/* Custom smooth range slider for runway ceiling */
-input[type="range"].vault-slider {
+input[type="range"].app-slider {
   -webkit-appearance: none;
   appearance: none;
   height: 6px;
   border-radius: 9999px;
-  background: #E2E6DF;
+  background: var(--vf-border);
   outline: none;
 }
 
-input[type="range"].vault-slider::-webkit-slider-thumb {
+input[type="range"].app-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 20px;
   height: 20px;
   border-radius: 9999px;
-  background: #1E6B58;
-  border: 2.5px solid #FFFFFF;
-  box-shadow: 0 2px 6px rgba(23, 33, 30, 0.2);
+  background: var(--vf-brand);
+  border: 2.5px solid var(--vf-card);
+  box-shadow: 0 2px 6px rgba(23, 33, 30, 0.25);
   cursor: pointer;
   transition: transform 150ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-input[type="range"].vault-slider::-webkit-slider-thumb:hover {
+input[type="range"].app-slider::-webkit-slider-thumb:hover {
   transform: scale(1.1);
 }
 

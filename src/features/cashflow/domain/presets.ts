@@ -1,88 +1,16 @@
-import { addDaysIso, getTodayIso } from '../../../core/utils/dateMath';
-import type {
-  BillingCycle,
-  CurrencyCode,
-  Subscription,
-  SubscriptionCategory,
-} from './subscription';
+import { addDaysIso, getTodayIso, parseIsoDate } from '../../../core/utils/dateMath';
+import type { Subscription } from './subscription';
 
-export interface ServicePreset {
-  readonly name: string;
-  readonly category: SubscriptionCategory;
-  readonly cycle: BillingCycle;
-  readonly suggestedAmountMinorUnits: number;
-  readonly currency: CurrencyCode;
+function withBillingDay(sub: Omit<Subscription, 'billingDay'>): Subscription {
+  return {
+    ...sub,
+    billingDay: parseIsoDate(sub.nextBillingDate)?.day ?? 1,
+  };
 }
-
-export const SERVICE_PRESETS: readonly ServicePreset[] = [
-  {
-    name: 'Netflix',
-    category: 'streaming',
-    cycle: 'monthly',
-    suggestedAmountMinorUnits: 1599,
-    currency: 'USD',
-  },
-  {
-    name: 'Spotify',
-    category: 'streaming',
-    cycle: 'monthly',
-    suggestedAmountMinorUnits: 1199,
-    currency: 'USD',
-  },
-  {
-    name: 'ChatGPT Plus',
-    category: 'aiAndCloud',
-    cycle: 'monthly',
-    suggestedAmountMinorUnits: 2000,
-    currency: 'USD',
-  },
-  {
-    name: 'Claude Pro',
-    category: 'aiAndCloud',
-    cycle: 'monthly',
-    suggestedAmountMinorUnits: 2000,
-    currency: 'USD',
-  },
-  {
-    name: 'iCloud+',
-    category: 'aiAndCloud',
-    cycle: 'monthly',
-    suggestedAmountMinorUnits: 299,
-    currency: 'USD',
-  },
-  {
-    name: 'AWS Cloud',
-    category: 'aiAndCloud',
-    cycle: 'monthly',
-    suggestedAmountMinorUnits: 1850,
-    currency: 'USD',
-  },
-  {
-    name: 'YouTube Premium',
-    category: 'streaming',
-    cycle: 'monthly',
-    suggestedAmountMinorUnits: 1399,
-    currency: 'USD',
-  },
-  {
-    name: 'Gym & Recovery',
-    category: 'health',
-    cycle: 'monthly',
-    suggestedAmountMinorUnits: 3800,
-    currency: 'USD',
-  },
-  {
-    name: 'Fiber Wi-Fi',
-    category: 'utilities',
-    cycle: 'monthly',
-    suggestedAmountMinorUnits: 4500,
-    currency: 'USD',
-  },
-];
 
 export function createSeedSubscriptions(todayIso: string = getTodayIso()): Subscription[] {
   return [
-    {
+    withBillingDay({
       id: 'sub_cloud_ai',
       name: 'Cloud GPU & AI Pro',
       amountMinorUnits: 2000,
@@ -94,10 +22,9 @@ export function createSeedSubscriptions(todayIso: string = getTodayIso()): Subsc
       isSimulatedPaused: false,
       isArchived: false,
       usageFrequency: 'rarely',
-      cancelUrl: 'https://billing.stripe.com',
       notes: '14-day Pro compute trial — cancel before renewal if unused.',
-    },
-    {
+    }),
+    withBillingDay({
       id: 'sub_gym',
       name: 'Gym & Recovery Club',
       amountMinorUnits: 3800,
@@ -110,8 +37,8 @@ export function createSeedSubscriptions(todayIso: string = getTodayIso()): Subsc
       isArchived: false,
       usageFrequency: 'weekly',
       notes: 'Monthly athletic club membership.',
-    },
-    {
+    }),
+    withBillingDay({
       id: 'sub_fiber',
       name: 'Fiber Gigabit Internet',
       amountMinorUnits: 4500,
@@ -125,8 +52,8 @@ export function createSeedSubscriptions(todayIso: string = getTodayIso()): Subsc
       isArchived: false,
       usageFrequency: 'daily',
       notes: 'Home 1Gbps broadband — promo rate expired (+$5/mo increase).',
-    },
-    {
+    }),
+    withBillingDay({
       id: 'sub_aws',
       name: 'AWS Staging Cluster',
       amountMinorUnits: 1850,
@@ -139,8 +66,8 @@ export function createSeedSubscriptions(todayIso: string = getTodayIso()): Subsc
       isArchived: false,
       usageFrequency: 'daily',
       notes: 'EC2 + RDS staging environment.',
-    },
-    {
+    }),
+    withBillingDay({
       id: 'sub_cinema',
       name: '4K Cinema Stream',
       amountMinorUnits: 1799,
@@ -154,8 +81,8 @@ export function createSeedSubscriptions(todayIso: string = getTodayIso()): Subsc
       isArchived: false,
       usageFrequency: 'unused',
       notes: 'Ultra HD family tier — haven’t watched since last month.',
-    },
-    {
+    }),
+    withBillingDay({
       id: 'sub_workspace',
       name: 'Figma & Workspace Suite',
       amountMinorUnits: 14400,
@@ -168,6 +95,6 @@ export function createSeedSubscriptions(todayIso: string = getTodayIso()): Subsc
       isArchived: false,
       usageFrequency: 'daily',
       notes: 'Annual design & productivity seat.',
-    },
+    }),
   ];
 }

@@ -1,4 +1,20 @@
-import { Cloud, Heart, PlayCircle, Wifi, Zap, type LucideIcon } from 'lucide-react';
+import {
+  Cloud,
+  Gamepad2,
+  GraduationCap,
+  Heart,
+  Landmark,
+  Music,
+  Newspaper,
+  PlayCircle,
+  ShoppingBag,
+  Smartphone,
+  Tag,
+  Utensils,
+  Wifi,
+  Zap,
+  type LucideIcon,
+} from 'lucide-react';
 import {
   CATEGORIES,
   type SubscriptionCategory,
@@ -13,16 +29,25 @@ export interface CategoryVisual {
 const ICONS: Record<SubscriptionCategory, LucideIcon> = {
   aiAndCloud: Cloud,
   streaming: PlayCircle,
+  music: Music,
   productivity: Zap,
-  utilities: Wifi,
+  gaming: Gamepad2,
+  news: Newspaper,
+  education: GraduationCap,
   health: Heart,
+  phoneInternet: Smartphone,
+  utilities: Wifi,
+  shopping: ShoppingBag,
+  food: Utensils,
+  finance: Landmark,
+  other: Tag,
 };
 
 export function getCategoryVisual(category: SubscriptionCategory): CategoryVisual {
-  const meta = CATEGORIES[category];
+  const meta = CATEGORIES[category] ?? CATEGORIES.other;
   return {
     label: meta.label,
     color: meta.color,
-    Icon: ICONS[category],
+    Icon: ICONS[category] ?? Tag,
   };
 }

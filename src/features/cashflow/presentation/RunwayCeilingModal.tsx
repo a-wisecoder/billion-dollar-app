@@ -33,6 +33,15 @@ export const RunwayCeilingModal: React.FC<RunwayCeilingModalProps> = ({
     setError(null);
   }, [isOpen, currentCeilingMinorUnits]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const defaultCeiling = CURRENCIES[baseCurrency].defaultMonthlyCeilingMinorUnits;
@@ -52,7 +61,7 @@ export const RunwayCeilingModal: React.FC<RunwayCeilingModalProps> = ({
     e.preventDefault();
     const minor = parseDecimalToMinorUnits(inputVal);
     if (minor === null) {
-      setError('Enter a valid positive monthly ceiling.');
+      setError('Enter a valid positive monthly budget.');
       return;
     }
     onSave(minor);
@@ -61,24 +70,24 @@ export const RunwayCeilingModal: React.FC<RunwayCeilingModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#17211E]/40 backdrop-blur-[2px] p-0 sm:p-4"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[var(--vf-backdrop)] backdrop-blur-[2px] p-0 sm:p-4"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="ceiling-modal-title"
+      aria-labelledby="budget-modal-title"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-md rounded-t-3xl sm:rounded-2xl bg-white border border-[#E4E7E1] p-5 sm:p-6 shadow-xl">
+      <div className="w-full max-w-md rounded-t-2xl sm:rounded-2xl bg-card border border-border p-5 sm:p-6 shadow-xl">
         <div className="flex items-center justify-between gap-4">
-          <h2 id="ceiling-modal-title" className="text-lg font-bold text-[#17211E]">
-            Monthly Runway Ceiling
+          <h2 id="budget-modal-title" className="text-lg font-bold text-text-primary">
+            Monthly budget
           </h2>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close ceiling editor"
-            className="min-h-[38px] min-w-[38px] rounded-xl bg-[#F5F6F3] border border-[#E4E7E1] text-[#5B6662] hover:text-[#17211E] flex items-center justify-center cursor-pointer"
+            aria-label="Close budget editor"
+            className="min-h-[44px] min-w-[44px] rounded-xl bg-subtle border border-border text-text-secondary hover:text-text-primary flex items-center justify-center cursor-pointer"
           >
             <X className="w-4 h-4" aria-hidden="true" />
           </button>
@@ -86,23 +95,23 @@ export const RunwayCeilingModal: React.FC<RunwayCeilingModalProps> = ({
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-5" noValidate>
           {error && (
-            <p role="alert" className="text-xs font-medium text-[#A63535]">
+            <p role="alert" className="text-[13px] font-medium text-red-text">
               {error}
             </p>
           )}
 
           <div>
             <div className="flex items-baseline justify-between mb-2">
-              <label htmlFor="ceiling-input" className="text-xs font-semibold text-[#5B6662]">
-                Target monthly limit ({baseCurrency})
+              <label htmlFor="budget-input" className="text-[13px] font-semibold text-text-secondary">
+                Monthly limit ({baseCurrency})
               </label>
-              <span className="text-xs font-mono tabular-nums text-[#5B6662]">
-                Current burn: {previewRatio}%
+              <span className="text-[13px] tabular-nums text-text-secondary">
+                Current spend: {previewRatio}%
               </span>
             </div>
 
             <input
-              id="ceiling-input"
+              id="budget-input"
               type="text"
               inputMode="decimal"
               value={inputVal}
@@ -113,14 +122,14 @@ export const RunwayCeilingModal: React.FC<RunwayCeilingModalProps> = ({
                   if (error) setError(null);
                 }
               }}
-              className="w-full h-12 px-4 rounded-xl bg-[#F5F6F3] border border-[#E4E7E1] font-mono tabular-nums text-lg font-bold text-[#17211E] focus:outline-none focus:bg-white focus:border-[#1E6B58]"
+              className="w-full h-12 px-4 rounded-xl bg-subtle border border-border tabular-nums text-lg font-bold text-text-primary focus:bg-card focus:border-brand"
             />
           </div>
 
           <div>
             <input
               type="range"
-              aria-label="Adjust monthly runway ceiling slider"
+              aria-label="Adjust monthly budget slider"
               min={minSlider}
               max={maxSlider}
               step={stepSlider}
@@ -129,9 +138,9 @@ export const RunwayCeilingModal: React.FC<RunwayCeilingModalProps> = ({
                 setInputVal(minorUnitsToInputString(Number(e.target.value)));
                 if (error) setError(null);
               }}
-              className="w-full vault-slider"
+              className="w-full app-slider"
             />
-            <div className="mt-1.5 flex justify-between font-mono tabular-nums text-[11px] text-[#5B6662]">
+            <div className="mt-1.5 flex justify-between tabular-nums text-xs text-text-secondary">
               <span>{formatMinorUnits(minSlider, baseCurrency, { showDecimals: false })}</span>
               <span>{formatMinorUnits(maxSlider, baseCurrency, { showDecimals: false })}</span>
             </div>
@@ -141,15 +150,15 @@ export const RunwayCeilingModal: React.FC<RunwayCeilingModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 h-11 rounded-xl bg-[#F5F6F3] border border-[#E4E7E1] text-sm font-semibold text-[#17211E] cursor-pointer"
+              className="flex-1 min-h-[44px] rounded-xl bg-subtle border border-border text-[15px] font-semibold text-text-primary cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="flex-[2] h-11 rounded-xl bg-[#1E6B58] hover:bg-[#175747] text-sm font-semibold text-white cursor-pointer"
+              className="flex-[2] min-h-[44px] rounded-xl bg-brand hover:bg-brand-hover text-[15px] font-semibold text-white cursor-pointer"
             >
-              Save Ceiling
+              Save budget
             </button>
           </div>
         </form>

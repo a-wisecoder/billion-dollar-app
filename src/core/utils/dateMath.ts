@@ -77,20 +77,26 @@ export function stepBillingDate(iso: string, cycle: BillingCycle, anchorDay?: nu
 
 /**
  * Advances a past billing date forward by its BillingCycle until it lands on or
- * after todayIso. Preserves the original anchor day across short months.
+ * after todayIso. Preserves the original anchorDay across short months.
  */
 export function advanceOverdueBillingDate(
   nextBillingIso: string,
   cycle: BillingCycle,
   todayIso: string = getTodayIso(),
+  anchorDay?: number,
 ): string {
   const parsed = parseIsoDate(nextBillingIso);
   if (!parsed) return todayIso;
 
+  const effectiveAnchorDay =
+    typeof anchorDay === 'number' && Number.isInteger(anchorDay) && anchorDay >= 1 && anchorDay <= 31
+      ? anchorDay
+      : parsed.day;
+
   let cursor = nextBillingIso;
   let guard = 0;
   while (daysUntilRenewal(cursor, todayIso) < 0 && guard < 1000) {
-    cursor = stepBillingDate(cursor, cycle, parsed.day);
+    cursor = stepBillingDate(cursor, cycle, effectiveAnchorDay);
     guard += 1;
   }
   return cursor;
@@ -98,16 +104,28 @@ export function advanceOverdueBillingDate(
 
 /**
  * Projects all billing dates for a subscription falling inside the given calendar
- * month (month is 1..12). Supports looking backward and forward across months.
+ * month (month is 1..12). Supports looking backward and forward across months,
+ * and never returns dates earlier than startDateIso when provided.
  */
 export function projectBillingDatesInMonth(
   anchorBillingIso: string,
   cycle: BillingCycle,
   year: number,
   month: number,
+  anchorDay?: number,
+  startDateIso?: string,
 ): string[] {
   const anchor = parseIsoDate(anchorBillingIso);
   if (!anchor) return [];
+
+  const effectiveAnchorDay =
+    typeof anchorDay === 'number' && Number.isInteger(anchorDay) && anchorDay >= 1 && anchorDay <= 31
+      ? anchorDay
+      : anchor.day;
+
+  const parsedStart = startDateIso ? parseIsoDate(startDateIso) : null;
+  const minDayNum = parsedStart ? toUtcDayNumber(startDateIso!) : null;
+  const allowDate = (iso: string) => minDayNum === null || toUtcDayNumber(iso) >= minDayNum;
 
   const monthStartIso = toIsoDate(year, month, 1);
   const monthEndIso = toIsoDate(year, month, daysInMonth(year, month));
@@ -121,7 +139,10 @@ export function projectBillingDatesInMonth(
     let day = 1 + offset;
     const maxDay = daysInMonth(year, month);
     while (day <= maxDay) {
-      results.push(toIsoDate(year, month, day));
+      const iso = toIsoDate(year, month, day);
+      if (allowDate(iso)) {
+        results.push(iso);
+      }
       day += 7;
     }
     return results;
@@ -132,22 +153,24 @@ export function projectBillingDatesInMonth(
   const monthDiff = targetMonthIndex - anchorMonthIndex;
 
   if (cycle === 'monthly') {
-    const day = Math.min(anchor.day, daysInMonth(year, month));
+    const day = Math.min(effectiveAnchorDay, daysInMonth(year, month));
     const iso = toIsoDate(year, month, day);
     const num = toUtcDayNumber(iso);
-    return num >= startDayNum && num <= endDayNum ? [iso] : [];
+    return num >= startDayNum && num <= endDayNum && allowDate(iso) ? [iso] : [];
   }
 
   if (cycle === 'quarterly') {
     if (((monthDiff % 3) + 3) % 3 !== 0) return [];
-    const day = Math.min(anchor.day, daysInMonth(year, month));
-    return [toIsoDate(year, month, day)];
+    const day = Math.min(effectiveAnchorDay, daysInMonth(year, month));
+    const iso = toIsoDate(year, month, day);
+    return allowDate(iso) ? [iso] : [];
   }
 
   // yearly
   if (((monthDiff % 12) + 12) % 12 !== 0) return [];
-  const day = Math.min(anchor.day, daysInMonth(year, month));
-  return [toIsoDate(year, month, day)];
+  const day = Math.min(effectiveAnchorDay, daysInMonth(year, month));
+  const iso = toIsoDate(year, month, day);
+  return allowDate(iso) ? [iso] : [];
 }
 
 export function formatShortDate(iso: string): string {
@@ -157,6 +180,14 @@ export function formatShortDate(iso: string): string {
   return date.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+export function formatMonthName(year: number, month: number): string {
+  const date = new Date(Date.UTC(year, month - 1, 1));
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
     timeZone: 'UTC',
   });
 }

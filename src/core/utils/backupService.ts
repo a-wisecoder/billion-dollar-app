@@ -142,12 +142,32 @@ export function parseVaultBackup(rawJson: string): BackupParseResult {
     if (!isCategory(item.category)) {
       return { ok: false, error: `Subscription "${item.name}" has an invalid category.` };
     }
-    if (typeof item.nextBillingDate !== 'string' || !parseIsoDate(item.nextBillingDate)) {
+    const parsedNextBilling =
+      typeof item.nextBillingDate === 'string' ? parseIsoDate(item.nextBillingDate) : null;
+    if (typeof item.nextBillingDate !== 'string' || !parsedNextBilling) {
       return {
         ok: false,
         error: `Subscription "${item.name}" has an invalid nextBillingDate (expected YYYY-MM-DD).`,
       };
     }
+
+    const billingDay =
+      typeof item.billingDay === 'number' &&
+      Number.isInteger(item.billingDay) &&
+      item.billingDay >= 1 &&
+      item.billingDay <= 31
+        ? item.billingDay
+        : parsedNextBilling.day;
+
+    const startDate =
+      typeof item.startDate === 'string' && parseIsoDate(item.startDate)
+        ? item.startDate.trim()
+        : undefined;
+
+    const catalogId =
+      typeof item.catalogId === 'string' && item.catalogId.trim()
+        ? item.catalogId.trim()
+        : undefined;
 
     const previousAmountMinorUnits =
       typeof item.previousAmountMinorUnits === 'number' &&
@@ -165,12 +185,15 @@ export function parseVaultBackup(rawJson: string): BackupParseResult {
     subscriptions.push({
       id: item.id.trim(),
       name: item.name.trim(),
+      ...(catalogId !== undefined ? { catalogId } : {}),
       amountMinorUnits: item.amountMinorUnits,
       ...(previousAmountMinorUnits !== undefined ? { previousAmountMinorUnits } : {}),
       currency: item.currency,
       cycle: item.cycle,
       category: item.category,
       nextBillingDate: item.nextBillingDate,
+      billingDay,
+      ...(startDate !== undefined ? { startDate } : {}),
       isFreeTrial: Boolean(item.isFreeTrial),
       isSimulatedPaused: Boolean(item.isSimulatedPaused),
       isArchived: Boolean(item.isArchived),
@@ -214,9 +237,35 @@ export function parseVaultBackup(rawJson: string): BackupParseResult {
         ? s.reminderLeadDays
         : defaults.reminderLeadDays;
 
+    const customRates: Partial<Record<CurrencyCode, number>> = {};
+    if (isRecord(s.customExchangeRates)) {
+      for (const code of CURRENCY_CODES) {
+        if (code === 'USD') continue;
+        const val = s.customExchangeRates[code];
+        if (typeof val === 'number' && Number.isFinite(val) && val > 0) {
+          customRates[code] = val;
+        }
+      }
+    }
+
+    const cardMarkupPercent =
+      typeof s.cardMarkupPercent === 'number' &&
+      Number.isFinite(s.cardMarkupPercent) &&
+      s.cardMarkupPercent >= 0 &&
+      s.cardMarkupPercent <= 10
+        ? Math.round(s.cardMarkupPercent * 100) / 100
+        : 0;
+
+    const calendarExportedAt =
+      typeof s.calendarExportedAt === 'string' && Number.isFinite(Date.parse(s.calendarExportedAt))
+        ? s.calendarExportedAt
+        : undefined;
+
     settings = {
       baseCurrency,
       exchangeRatesPerUsd: rates,
+      customExchangeRates: customRates,
+      cardMarkupPercent,
       monthlyCeilingMinorUnits: ceiling,
       monthlyIncomeMinorUnits,
       notificationsEnabled:
@@ -224,6 +273,15 @@ export function parseVaultBackup(rawJson: string): BackupParseResult {
           ? s.notificationsEnabled
           : defaults.notificationsEnabled,
       reminderLeadDays: lead,
+      isDemo: typeof s.isDemo === 'boolean' ? s.isDemo : false,
+      onboardingDone:
+        typeof s.onboardingDone === 'boolean'
+          ? s.onboardingDone
+          : subscriptions.length > 0,
+      ...(calendarExportedAt ? { calendarExportedAt } : {}),
+      ...(typeof s.calendarExportDirty === 'boolean'
+        ? { calendarExportDirty: s.calendarExportDirty }
+        : {}),
     };
   }
 
